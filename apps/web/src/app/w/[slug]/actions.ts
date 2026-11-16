@@ -56,7 +56,7 @@ export async function inviteAction(slug: string, _: ActionResult, data: FormData
     const url = `${serverEnv().APP_URL}/invite/${invite.token}`;
     revalidatePath(`/w/${slug}/settings/members`);
     try {
-      await sendActionEmail({
+      const { delivered } = await sendActionEmail({
         to: invite.email,
         subject: `${actor.name} invited you to ${access.workspace.name}`,
         intro: `${actor.name} (${actor.email}) invited you to join the ${access.workspace.name} workspace.`,
@@ -64,6 +64,7 @@ export async function inviteAction(slug: string, _: ActionResult, data: FormData
         actionUrl: url,
         outro: `This invitation expires on ${invite.expiresAt.toUTCString()}.`
       });
+      if (!delivered) return { ok: `Invitation created. Email is off on this demo, so share this link with ${invite.email}: ${url}` };
       return { ok: `Invitation sent to ${invite.email}.` };
     } catch (err) {
       console.error("[invite] email failed:", (err as Error).message);

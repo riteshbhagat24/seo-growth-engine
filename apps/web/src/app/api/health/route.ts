@@ -33,5 +33,6 @@ export async function GET() {
     console.error("[health] APP_DATABASE_URL uses a privileged role; tenant isolation is not guaranteed", role);
     return Response.json({ status: "error", config: "ok", database: "ok", isolation: "unsafe_role" }, { status: 503 });
   }
-  return Response.json({ status: "ok", config: "ok", database: "ok", isolation: "ok" });
+  // "log" = demo mode: emails are not delivered (see MAIL_TRANSPORT).
+  return Response.json({ status: "ok", config: "ok", database: "ok", isolation: "ok", mail: serverEnv().MAIL_TRANSPORT });
 }

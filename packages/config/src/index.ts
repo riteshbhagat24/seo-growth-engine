@@ -28,6 +28,12 @@ const serverSchema = z.object({
   ENCRYPTION_KEY: optional(z.string()),
   CRON_SECRET: optional(z.string().min(16)),
 
+  /**
+   * "smtp" (default) sends real email. "log" is a DEMO-ONLY mode: emails are not
+   * sent; their links are written to the server log instead. Must be chosen
+   * explicitly; it is never a fallback. Reported by /api/health.
+   */
+  MAIL_TRANSPORT: z.enum(["smtp", "log"]).default("smtp"),
   SMTP_HOST: optional(z.string()),
   SMTP_PORT: z.coerce.number().int().default(587),
   SMTP_SECURE: z.preprocess((v) => v === "true" || v === "1", z.boolean()).default(false),
@@ -62,7 +68,9 @@ export function serverEnv(): ServerEnv {
   }
   const env = parsed.data;
   if (env.NODE_ENV === "production") {
-    const missing = (["BETTER_AUTH_SECRET", "ENCRYPTION_KEY", "CRON_SECRET", "SMTP_HOST"] as const).filter((k) => !env[k]);
+    const required = ["BETTER_AUTH_SECRET", "ENCRYPTION_KEY", "CRON_SECRET"] as const;
+    const missing: string[] = required.filter((k) => !env[k]);
+    if (env.MAIL_TRANSPORT === "smtp" && !env.SMTP_HOST) missing.push("SMTP_HOST (or MAIL_TRANSPORT=log for a demo)");
     if (missing.length) throw new Error(`Required in production: ${missing.join(", ")}`);
     const { protocol, hostname } = new URL(env.APP_URL);
     const local = hostname === "localhost" || hostname === "127.0.0.1";
