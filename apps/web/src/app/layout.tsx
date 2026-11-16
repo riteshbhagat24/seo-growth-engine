@@ -12,9 +12,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const productName = process.env.PRODUCT_NAME ?? "Futuready Media";
+
 export const metadata: Metadata = {
-  title: process.env.PRODUCT_NAME ?? "Futuready Media",
-  description: "SEO Growth Engine",
+  title: { default: productName, template: `%s · ${productName}` },
+  description: "SEO Growth Engine: audits, keywords, backlinks and reporting for businesses and agencies."
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

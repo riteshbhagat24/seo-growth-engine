@@ -97,3 +97,14 @@ Logged events include: sign-in and failures, 2FA changes, membership and role ch
 ## 10. Privacy
 
 Data export per workspace (JSON/CSV), workspace deletion (soft delete for 30 days, then hard delete including backups as they age out), account deletion, minimal personal data on outreach contacts, and documented legal basis for outreach contacts being the user organisation's responsibility.
+
+## 11. Implementation notes (M1)
+
+- **Identity is separated from tenant data at the database level.** Better Auth's tables live in schema `auth`, reachable only by the `auth_user` role. The tenant role `app_user` cannot read password hashes or sessions, and `auth_user` cannot read tenant tables (both proven by tests). Two narrow `SECURITY DEFINER` functions bridge the gap: `current_user_identity()` (the current user's own email and verification status) and `org_member_profiles()` (names and emails of members of the current tenant only).
+- **Invitations:** only `sha256(token)` is stored. A request holding the token can see that one invitation and its workspace name (policy `invite_by_token`), nothing else. Accepting requires a signed-in user whose verified email matches; the token is single-use and expires after 7 days.
+- **Stale-role protection:** every workspace mutation re-reads the actor's role inside its own transaction, so a role removed mid-request can't be used.
+- **Exactly one owner** per workspace is enforced by a partial unique index; ownership transfer demotes then promotes in one transaction.
+- **Audit logs** are append-only for `app_user` (UPDATE/DELETE/TRUNCATE revoked).
+- **Rate limits** (Better Auth, stored in Postgres): sign-in 5/min, sign-up, magic link, password reset and verification resend 5 per 5 min, per client IP. Passwords: 10–128 characters, checked against the Have I Been Pwned range API (k-anonymity: only 5 hash characters leave the server).
+- **Client IP trust:** rate limiting and audit IPs come from `TRUSTED_IP_HEADERS` (default `x-forwarded-for`). This is only safe if the hosting proxy overwrites that header. Vercel does. **Before going live on cPanel, confirm what the host's proxy sets**, and change the variable if needed; otherwise clients can spoof their IP and bypass per-IP limits.
+- **Not yet built (scheduled):** TOTP two-factor authentication and breached-password checks on password change are planned for M11 hardening.

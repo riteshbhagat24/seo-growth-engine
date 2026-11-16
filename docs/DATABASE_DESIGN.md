@@ -149,3 +149,13 @@ High-volume tables (`audit_pages`, `audit_issues`) are pruned by retention polic
 - RLS policies, roles and grants live in hand-written SQL migrations alongside the generated ones.
 - Destructive changes follow expand → migrate → contract across two releases.
 - Seeds: `plans` (Free, Pro, Agency defaults), `audit_rules`, and the `link_sources` seed dataset. All are idempotent upserts.
+
+## 14. As built (M1)
+
+- Schemas: `auth` (Better Auth: `users`, `sessions`, `accounts`, `verifications`, `rate_limits`; uuid ids) and `public` (tenant data).
+- Roles: `app_owner` (migrations), `app_user` (tenant data, RLS), `auth_user` (identity schema only). `platform_admin` arrives in M11.
+- `organizations.personal_owner_user_id` is UNIQUE: one personal workspace per user, race-safe.
+- `memberships`: unique (organization_id, user_id); partial unique index allows one `owner` per organisation.
+- `invitations`: `token_hash` unique; partial unique index on (organization_id, lower(email)) while `pending`.
+- Policies beyond the standard `tenant_isolation`: `membership_self_read` (a user can list their own memberships across workspaces), `org_select` (current tenant, member, or invitation-token holder), `invite_by_token`, `platform_settings.read_all`.
+- FORCE RLS applies to the table owner too, so seed rows are inserted before RLS is enabled, and SECURITY DEFINER functions still respect tenant policies on public tables.

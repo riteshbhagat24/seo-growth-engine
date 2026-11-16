@@ -14,11 +14,16 @@
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @sge/db generate",
-    "db:migrate": "pnpm --filter @sge/db migrate"
+    "db:migrate": "pnpm --filter @sge/db migrate",
+    "build:standalone": "pnpm --filter @sge/web build && node scripts/prepare-standalone.mjs",
+    "e2e": "playwright test"
   },
   "pnpm": {
     "overrides": {
       "rollup": "npm:@rollup/wasm-node@^4.50.0"
     }
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
   }
 }

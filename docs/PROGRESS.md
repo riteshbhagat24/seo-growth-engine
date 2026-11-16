@@ -52,11 +52,63 @@ The isolation tests prove that, as `app_user`:
 - malformed tenant ids are rejected before any SQL runs;
 - `app_user` cannot disable RLS or run DDL.
 
-Not yet verified: the CI workflow has not run on GitHub (the repo isn't pushed yet).
+CI on GitHub: ✅ green after the first push.
 
-## Next: M1 — Accounts & workspaces
+## M1 — Accounts & workspaces ✅ (2026-11-16)
 
-Better Auth (email/password, verification, magic link, Google sign-in), personal workspace on sign-up, agency workspaces, invitations, roles and permission matrix, membership-based RLS for the workspace switcher, audit logs, branding settings.
+Implemented:
+- **Accounts (Better Auth 1.7):** email + password with required email verification, email sign-in links (magic link), optional Google sign-in (the button appears only when a free Google OAuth client is configured), password reset by email (signs out all sessions), change password, profile name, active-session list with "sign out other sessions", sign out
+- **Password policy:** 10–128 characters, breached-password check (Have I Been Pwned range API)
+- **Rate limits** stored in Postgres, per client IP: sign-in 5/min; sign-up, magic link, reset and verification resend 5 per 5 min
+- **Workspaces:** personal workspace created automatically on sign-up (race-safe, idempotent); agency workspaces (verified email required); workspace switcher; URLs `/w/<slug>`
+- **Team:** email invitations (7-day, single-use, hashed tokens, must match the verified email), revoke, change role, remove member, leave workspace, transfer ownership
+- **Roles and permissions:** owner, admin, manager, specialist, viewer (client arrives with client management in M2); permission matrix in `packages/core/src/permissions.ts`; enforced in the UI, in every service (with a fresh-role re-check) and by RLS
+- **Branding:** workspace name, primary/accent colours and logo URL, applied to the workspace shell through CSS variables; product name and colours from `platform_settings`
+- **Audit log:** append-only, per workspace (sign-up and sign-in events are recorded at user level); viewer page for owners and admins
+- **Database:** identity schema `auth` with its own `auth_user` role; memberships, invitations, audit_logs and platform_settings with RLS (DATABASE_DESIGN §14)
+- **Security headers:** nosniff, frame deny, referrer policy, HSTS, permissions policy
+- `scripts/dev-env.mjs` (local env files with generated secrets) and `scripts/prepare-standalone.mjs` (complete production bundle, also for cPanel)
+- CI now also runs lint, the production build and the Playwright end-to-end suite
+
+Verified (local, 2026-11-16):
+| Check | Result |
+|---|---|
+| Typecheck (5 packages) and lint | ✅ |
+| `@sge/db` schema invariants + RLS isolation (now covering 6 tenant tables) | ✅ 12/12 |
+| `@sge/core` permission matrix (108 cases) + workspace flows (24) | ✅ 132/132 |
+| `@sge/worker` | ✅ 2/2 |
+| Production build (standalone) | ✅ |
+| **Playwright e2e against the production bundle, real database and real emails (Mailpit)** | ✅ 12/12 |
+
+The core workspace tests cover:
+- concurrent first logins create exactly one personal workspace;
+- replayed invitations, wrong or unverified emails, and revoked or expired tokens are all rejected;
+- admins can't grant owner or manage the owner;
+- a role removed mid-request can't be used;
+- **a forged request for another tenant's workspace is rejected by the database** for reads, invites and updates;
+- audit rows can't be updated or deleted;
+- the tenant role can't read `auth.users` or `auth.sessions`, and the identity role can't read tenant tables.
+
+The e2e suite covers:
+- redirect to sign-in when logged out;
+- sign-up → verification email → personal workspace; wrong password rejected;
+- agency creation; invite by email → invitee signs up from the link → joins as Manager; the link can't be reused;
+- a Manager doesn't see the invite form and gets 404 on the audit URL;
+- an outsider gets 404 on the agency and doesn't see it in their switcher;
+- branding applied and audited;
+- sign out and back in; password reset by email revokes the old session;
+- the per-IP sign-in rate limit returns 429 while other clients are unaffected.
+
+Known gaps / remaining work:
+- **TOTP two-factor authentication:** moved to M11 hardening to keep M1 focused (the PRD lists it as MVP).
+- **Logo upload:** the logo is a URL for now; file storage comes later and needs an option that works on cPanel.
+- **Google sign-in:** wired up but not tested end to end; it needs a free Google OAuth client ID from you.
+- **Before cPanel production:** confirm which header the host's proxy uses for the client IP and set `TRUSTED_IP_HEADERS` (SECURITY §11).
+- **Account deletion and data export:** scheduled with the privacy features in M11.
+
+## Next: M2 — Plans, usage, clients, websites
+
+Plan definitions and usage limits (no billing), clients and client assignment, the Client role with its read-only portal scope, and websites with ownership verification (DNS TXT, meta tag, HTML file).
 
 ## Seed directory dataset (draft, needs review)
 

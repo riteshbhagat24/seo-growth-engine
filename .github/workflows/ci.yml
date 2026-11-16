@@ -17,9 +17,9 @@ jobs:
         ports: ["54329:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
-    env:
-      DATABASE_URL: postgres://app_user:app_user@localhost:54329/sge
-      DATABASE_URL_OWNER: postgres://app_owner:app_owner@localhost:54329/sge
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports: ["1025:1025", "8025:8025"]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -27,10 +27,24 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - name: Create database roles
+      - name: Create database roles and databases
         run: PGPASSWORD=postgres psql -h localhost -p 54329 -U postgres -f docker/postgres-init.sql
       - run: pnpm install --frozen-lockfile
+      - name: Local env files with generated secrets
+        run: node scripts/dev-env.mjs
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm --filter @sge/web lint
+      - name: Unit + integration tests (incl. tenant isolation)
+        run: pnpm test
       - run: pnpm db:migrate
-      - run: pnpm --filter @sge/web build
+      - run: pnpm build:standalone
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7

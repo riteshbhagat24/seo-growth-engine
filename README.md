@@ -2,7 +2,7 @@
 
 Multi-tenant SaaS for technical SEO audits, keyword tracking, white-hat backlink acquisition and verified reporting, for individual businesses and for agencies managing many clients.
 
-**Status:** M0 (foundations) complete. See [docs/PROGRESS.md](docs/PROGRESS.md). Fully independent of any existing website, repository, database or hosting project. Default product name: Futuready Media (configurable).
+**Status:** M0 (foundations) and M1 (accounts & workspaces) complete. See [docs/PROGRESS.md](docs/PROGRESS.md). Fully independent of any existing website, repository, database or hosting project. Default product name: Futuready Media (configurable).
 
 ## Documents
 
@@ -26,11 +26,21 @@ Multi-tenant SaaS for technical SEO audits, keyword tracking, white-hat backlink
 Requires Node 20+, pnpm 9 and Docker.
 
 ```bash
-cp .env.example .env            # also copy to apps/web/.env.local, apps/worker/.env, packages/db/.env
 pnpm install
-pnpm db:up                      # Postgres on :54329, Mailpit UI on :8025
+node scripts/dev-env.mjs        # creates .env files with fresh local secrets
+pnpm db:up                      # Postgres on :54329, Mailpit (dev inbox) on http://localhost:8025
 pnpm db:migrate
-pnpm dev                        # http://localhost:3000  (health: /api/health)
-pnpm test                       # includes the tenant-isolation suite
+pnpm dev                        # http://localhost:3000; sign-up emails land in Mailpit
+```
+
+Checks (the same ones CI runs):
+
+```bash
+pnpm typecheck
+pnpm --filter @sge/web lint
+pnpm test                       # unit + integration, incl. the tenant-isolation suites
+pnpm build:standalone           # production bundle (also what cPanel runs)
+npx playwright install chromium # once
+pnpm e2e                        # browser tests against the production bundle
 pnpm --filter @sge/worker once  # one worker batch (what the cPanel cron runs)
 ```
