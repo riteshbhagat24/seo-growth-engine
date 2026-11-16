@@ -57,3 +57,17 @@ Not yet verified: the CI workflow has not run on GitHub (the repo isn't pushed y
 ## Next: M1 — Accounts & workspaces
 
 Better Auth (email/password, verification, magic link, Google sign-in), personal workspace on sign-up, agency workspaces, invitations, roles and permission matrix, membership-based RLS for the workspace switcher, audit logs, branding settings.
+
+## Seed directory dataset (draft, needs review)
+
+`packages/db/seed/link_sources.csv`: 108 free or freemium listing sites, research-checked on 2026-11-16. Not loaded into any database yet; it ships only after human review (M6).
+
+| Confidence | Rows | Meaning |
+|---|---|---|
+| high | 19 | page fetched, live, free listing confirmed |
+| medium | 33 | strong search evidence, or fetched but free tier not stated |
+| low | 56 | from memory or blocked by the site (403/bot check) |
+
+- **Link type:** every row's `link_type_known` is `unknown`; no row is assumed to be dofollow. The link verifier (M7) will fill this in from real pages.
+- **Check first:** SelectedFirms, SuperbCompanies and MarTech Series may be paid-only.
+- **Excluded:** paid-only (BetaList, Awwwards, CSS Design Awards, Forbes Councils, Entrepreneur), closed (Uneed, Social Media Today contributors), dead or broken (DesignFirms, ClickIndia TLS), partner-status-only (Semrush, BrightLocal, HubSpot, Google Partners), and link-farm-like lists.
