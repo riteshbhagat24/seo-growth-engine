@@ -24,6 +24,7 @@
     }
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.0"
+    "@playwright/test": "^1.56.0",
+    "pg": "^8.16.0"
   }
 }
