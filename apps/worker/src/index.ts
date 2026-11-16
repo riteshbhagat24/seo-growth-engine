@@ -18,7 +18,7 @@ const IDLE_SLEEP_MS = 5_000;
 
 async function main() {
   const env = serverEnv();
-  const db = createDb(env.DATABASE_URL);
+  const db = createDb(env.APP_DATABASE_URL);
   await db.execute(sql`select 1`);
   log("worker started", { mode: ONCE ? "once" : "daemon" });
 
@@ -27,7 +27,7 @@ async function main() {
   if (ONCE) {
     const result = await runTick(handler, BUDGET_MS);
     log("tick finished", { ...result });
-    await getPool(env.DATABASE_URL).end();
+    await getPool(env.APP_DATABASE_URL).end();
     return;
   }
 
@@ -37,7 +37,7 @@ async function main() {
     const result = await runTick(handler, BUDGET_MS);
     if (result.stoppedBecause === "idle") await new Promise((r) => setTimeout(r, IDLE_SLEEP_MS));
   }
-  await getPool(env.DATABASE_URL).end();
+  await getPool(env.APP_DATABASE_URL).end();
   log("worker stopped");
 }
 

@@ -10,8 +10,12 @@ const optional = <T extends z.ZodTypeAny>(schema: T) =>
  */
 const serverSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  /** Runtime connection as `app_user` (RLS enforced, no BYPASSRLS). */
-  DATABASE_URL: z.string().url(),
+  /**
+   * Runtime connection as `app_user` (RLS enforced, no BYPASSRLS).
+   * Deliberately NOT named DATABASE_URL: hosting integrations (e.g. Vercel + Neon)
+   * inject a DATABASE_URL using the owner role (DDL rights, possibly BYPASSRLS).
+   */
+  APP_DATABASE_URL: z.string().url(),
   /** Identity connection as `auth_user` (schema "auth" only). */
   AUTH_DATABASE_URL: optional(z.string().url()),
   /** Owner connection, used only by migrations and admin tooling. */

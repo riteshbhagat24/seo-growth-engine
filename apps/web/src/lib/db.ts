@@ -4,5 +4,5 @@ import { serverEnv } from "@sge/config";
 
 /** Runtime database handle (app_user). Tenant data must go through withTenant(). */
 export function db() {
-  return createDb(serverEnv().DATABASE_URL);
+  return createDb(serverEnv().APP_DATABASE_URL);
 }
