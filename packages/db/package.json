@@ -1,0 +1,30 @@
+{
+  "name": "@sge/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts", "./schema": "./src/schema.ts" },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo skip",
+    "test": "vitest run",
+    "build": "echo skip"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.4",
+    "pg": "^8.16.0",
+    "uuidv7": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.15.0",
+    "drizzle-kit": "0.31.11",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "dotenv": "^17.0.0"
+  }
+}
