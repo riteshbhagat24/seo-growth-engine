@@ -14,7 +14,9 @@ export function getPool(connectionString: string): pg.Pool {
   const store = (g.__sgePools ??= pools);
   let pool = store.get(connectionString);
   if (!pool) {
-    pool = new pg.Pool({ connectionString, max: 10, idleTimeoutMillis: 30_000 });
+    // Serverless (Vercel): keep this small (e.g. 3) and use Neon's pooled endpoint.
+    const max = Number(process.env.DB_POOL_MAX ?? 10);
+    pool = new pg.Pool({ connectionString, max: Number.isFinite(max) && max > 0 ? max : 10, idleTimeoutMillis: 30_000 });
     store.set(connectionString, pool);
   }
   return pool;
