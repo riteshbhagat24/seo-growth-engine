@@ -43,7 +43,7 @@ test("sign-up → email verification → personal workspace", async ({ browser }
   ownerPage = await signUp(browser, owner);
   await expect(ownerPage).toHaveURL(/\/w\/olivia-s-workspace-[0-9a-f]{6}$/);
   await expect(ownerPage.getByRole("heading", { name: "Olivia's workspace" })).toBeVisible();
-  await expect(ownerPage.getByText("Personal workspace", { exact: true })).toBeVisible();
+  await expect(ownerPage.getByRole("main").getByText("Personal workspace", { exact: true })).toBeVisible();
 });
 
 test("wrong password is rejected", async ({ page }) => {

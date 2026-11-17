@@ -57,7 +57,7 @@ export default async function WebsitesPage({ params, searchParams }: PageProps<"
           </Card>
         )}
 
-        <Card className="p-0">
+        <Card className="p-0 sm:p-0">
           {rows.length === 0 ? (
             <p className="p-6 text-sm text-muted">{manage ? "No websites yet. Add your first one above." : "No websites have been shared with you yet."}</p>
           ) : (

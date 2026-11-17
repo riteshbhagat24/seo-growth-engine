@@ -45,7 +45,7 @@ export default async function ClientsPage({ params, searchParams }: PageProps<"/
             </ActionForm>
           </Card>
         )}
-        <Card className="p-0">
+        <Card className="p-0 sm:p-0">
           {clients.length === 0 ? (
             <p className="p-6 text-sm text-muted">{manage ? "No clients yet." : "No clients have been shared with you."}</p>
           ) : (

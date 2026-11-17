@@ -225,6 +225,7 @@ export async function checkOwnership(
   w: Pick<Website, "url" | "domain" | "verificationToken">,
   deps: VerificationDeps
 ): Promise<string | null> {
+  if (method === "gsc") return "Search Console ownership is checked through the connected Google account.";
   const ins = verificationInstructions(w);
   try {
     if (method === "dns_txt") {

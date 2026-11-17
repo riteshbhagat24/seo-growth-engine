@@ -38,7 +38,7 @@ export default async function ClientPage({ params }: PageProps<"/w/[slug]/client
       </div>
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
-          <Card className="p-0">
+          <Card className="p-0 sm:p-0">
             <div className="flex items-center justify-between px-6 pt-5 pb-3">
               <h2 className="font-semibold">Websites</h2>
               {addSites && !archived && (

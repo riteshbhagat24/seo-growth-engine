@@ -177,3 +177,19 @@ OAuth refresh tokens, API keys, SMTP and WordPress passwords are stored encrypte
 **Consequence.**
 - Raw crawl data and audit results share one retention policy (the newest 10 audits per website).
 - Translating or overriding rule text per platform will need a table later. It can be added then, keyed by rule code.
+
+### ADR-003 (M5): Google data sync and the app shell
+
+**Sync.**
+- **Order:** each sync job fills the most recent 28 days first (so dashboards are useful within a minute), then catches up forward, then backfills in 14-day windows until it reaches 16 months (Search Console) or 90 days (GA4).
+- **Writes:** each window is written as delete + insert in one transaction, so retries and overlapping runs are idempotent.
+- **State:** progress lives in `website_google` (`synced_from` / `synced_through`), not in job payloads, so any run mode (worker, cron or `after()`) resumes correctly.
+
+**Data volume.**
+- **Totals:** stored exactly per day.
+- **Query × page rows:** capped at 500 per day of a sync window (top by clicks), which keeps a 16-month backfill around 240k rows for a busy site and suits free Postgres tiers.
+- **Partitioning:** deferred.
+
+**UI.**
+- **Layout:** a sidebar shell (client component, for active states and the mobile drawer) wraps every workspace page, and each website has its own tabbed area under `/websites/[id]/…`.
+- **Charts:** a small SVG component, so they render on the server, need no chart library, and follow the data-visualisation rules: single series, no dual axes, keyboard-readable, with a table view.

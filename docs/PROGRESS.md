@@ -270,9 +270,69 @@ Known gaps / remaining work:
 - **Not built yet:** JavaScript rendering (no headless browser, by design), gzipped sitemaps, image file-size checks, and PDF reports (M10).
 - **Demo database:** apply the M4 migrations to Neon with `node scripts/neon-setup.mjs` before deploying this version.
 
-## Next: M5 — Google integrations & keywords
+## M5 — Google integrations, keywords, dashboards and UI overhaul ✅ (2026-11-17)
 
-Google OAuth (tokens encrypted with the M4 secrets helper), Search Console sync and backfill, GA4 sync, the keywords module, and dashboards.
+Implemented:
+- **Google OAuth per workspace** (`@sge/core/google`). One Google account per workspace, separate from "Sign in with Google".
+  - **Scopes:** read-only `webmasters.readonly` and `analytics.readonly`, plus openid and email.
+  - **Flow:** PKCE (S256) and a random state, kept in a signed (HMAC), httpOnly, 10-minute, single-use cookie. The callback also checks the state and the signed-in user, and `/app` passes connection messages on to the Integrations page.
+  - **Storage:** refresh tokens are encrypted with AES-256-GCM (the M4 secrets helper), bound to the workspace.
+  - **Revoked or expired access:** marks the connection as expired, shows "Reconnect", and stops sync jobs without retrying them.
+  - **Disconnect:** revokes the token at Google and disables scheduled syncs; imported data is kept.
+- **Property linking per website:**
+  - Search Console sites are listed with the website's own domain first; other domains can't be chosen.
+  - GA4 properties come from the Admin API account summaries.
+  - Choices are re-checked against the Google account on save.
+  - Owning the linked Search Console property verifies the website (new method `gsc`), with a weekly re-check through the API.
+- **Sync jobs (`gsc.sync`, `ga4.sync`):** resumable and idempotent (delete + insert per date window).
+  - **Order:** the newest 28 days first, then forward catch-up, then backfill in 14-day steps.
+  - **History:** Search Console 16 months (final data, about 3 days behind); GA4 90 days, with the last 3 days re-fetched on every sync.
+  - **Search Console data stored:** daily site totals (exact), device and country per day, and the top 500 query × page rows per day.
+  - **GA4 data stored:** daily rows by source, medium, landing page and campaign (sessions, engaged sessions, key events), up to 1,000 rows per day.
+  - **Schedule:** a daily sync per linked product, plus "Sync now" (limited to once per 10 minutes).
+  - **Error handling:** permission errors are shown on the website, and 429/5xx responses are retried.
+- **Keywords module:**
+  - **Adding:** add a list, track straight from the Search Console query table or from suggestions (queries you already appear for), or import a CSV.
+  - **CSV import:** RFC 4180 parsing with `,`/`;`/tab detection and a BOM. Ahrefs, Semrush, Search Console, Keyword Planner and plain-list headers are recognised. Volume and difficulty need a source label (never invented). Existing keywords are updated, not duplicated.
+  - **Fields:** groups, tags, intent, target page and notes; the target page must be on the website.
+  - **Metrics from Search Console:** last 28 days against the 28 before: position with its change, clicks, impressions, CTR, and the page that ranks, with a "≠ target" flag when it isn't the target page.
+  - **Keyword page:** weekly position and clicks history.
+  - **Also:** bulk remove, and the plan's `keywords` limit is now enforced (counted from real rows).
+- **Dashboards:**
+  - **Search performance:** KPIs with change, separate charts for clicks, impressions, CTR and position (the position axis is inverted), top queries (with "Track"), top pages, devices and countries, and ranges from 7 days to 16 months.
+  - **Traffic (GA4):** sessions, engagement, key events, source / medium, landing pages and referral sources.
+  - **Website overview:** KPIs, a setup checklist, a clicks chart, top issues and top keywords.
+  - **Workspace overview:** workspace-wide KPIs, a health card per website, and a getting-started checklist.
+- **UI overhaul:**
+  - **App shell:** a sidebar with icons, active states and grouped navigation; a workspace switcher; a user card; a mobile slide-over menu.
+  - **Website area:** a header and tabs: Overview, Site audit, Keywords, Search performance, Traffic, On-page, Settings. Verification, Google data, details and removal moved to Settings.
+  - **Design system:** refined tokens and shadows; new KPI tiles, change indicators (arrow plus text, never colour alone), segmented range control, empty states, bar lists, cards with headers, and a compact in-row action form. `tailwind-merge` resolves class overrides. Icons come from lucide-react.
+  - **Charts:** single-series SVG (no dual axes), 2px lines, a recessive grid, a crosshair and tooltip on hover, arrow-key reading, and a data-table view.
+
+Verified (local, 2026-11-17):
+| Check | Result |
+|---|---|
+| Typecheck (8 packages) and lint | ✅ |
+| `@sge/core` (+17: PKCE URL; encrypted token storage; roles; bad code / no offline access / not configured; property listing and domain matching; GSC-owned → verified + schedules; 16-month backfill with exact row counts; idempotent re-sync; incremental sync fetches only new days; dashboard totals and breakdowns; workspace, client-scope and raw-SQL isolation of 6 new tables; revoked token → expired, no retries; 403 handling; disconnect revokes and stops schedules; sync-window planner; keywords: case-insensitive de-duplication, off-site target rejected, Search Console metrics join, suggestions, history, CSV import with source rule, plan limit, roles, cross-workspace delete blocked) | ✅ 215/215 |
+| `@sge/crawler` 87, `@sge/seo-rules` 48, `@sge/db` 12, `@sge/jobs` 11 | ✅ |
+| Playwright e2e: M1 12, M2 7, M3 1, M4 5, M5 6 (Google start redirect with PKCE and an httpOnly signed cookie; forged and replayed callbacks refused; dashboards on seeded data incl. range switch and keyboard chart reading; Track from queries; keywords add, CSV import, detail, bulk remove; overview; mobile menu) | ✅ 31/31 |
+| Screenshots of every new page at desktop and mobile width reviewed | ✅ |
+
+Bugs and issues caught:
+- **Lost "expired" message:** an expired Google connection attempt redirected to a page that dropped its message. `/app` now passes it to the Integrations page.
+- **Card padding overrides:** class order didn't override padding (`p-0` vs `sm:p-6`) or widths. Fixed with `tailwind-merge`.
+- **Sync now without Google:** "Sync now" was shown with no Google connection. It's now hidden until Google is connected.
+
+Known gaps / remaining work:
+- **Google consent screen in Testing mode:** only listed test users can connect, and Google expires their refresh tokens after 7 days. For real customers, the OAuth app needs Google's verification for the sensitive read-only scopes. See the deployment notes.
+- **No table partitioning yet:** Search Console and GA4 tables use primary-key indexes. Monthly partitioning (DATABASE_DESIGN §7) is deferred until volumes need it.
+- **Countries show as codes:** ISO-3 codes from Search Console, without full names.
+- **Volume and difficulty only from imports:** there's no paid keyword API, by design.
+- **Not built yet:** dark mode, and a workspace-wide keyword list across all websites.
+
+## Next: M6 — Backlink discovery, scoring and submissions
+
+Seed `link_sources` dataset, CSV, competitor and manual imports, footprint helper, site inspection, scoring with explanations, and a submission workflow with approvals.
 
 ## Seed directory dataset (draft, needs review)
 

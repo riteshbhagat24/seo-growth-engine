@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { removeApiKey, setApiKey } from "@sge/core";
+import { disconnectGoogle, removeApiKey, setApiKey } from "@sge/core";
 import type { ActionResult } from "@/components/form";
 import { field, runAction } from "@/lib/actions";
 import { db } from "@/lib/db";
@@ -20,5 +20,13 @@ export async function removePsiKeyAction(slug: string, _: ActionResult): Promise
     const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
     await removeApiKey(db(), actor, access, "psi");
     redirect(`/w/${slug}/settings/integrations?removed=psi`);
+  });
+}
+
+export async function disconnectGoogleAction(slug: string, _: ActionResult): Promise<ActionResult> {
+  return runAction(async () => {
+    const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
+    await disconnectGoogle(db(), actor, access);
+    redirect(`/w/${slug}/settings/integrations?google=disconnected`);
   });
 }

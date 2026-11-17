@@ -203,3 +203,21 @@ High-volume tables (`audit_pages`, `audit_issues`) are pruned by retention polic
 - **Deviation from §6**: there is no `audit_rules` table and no `audit_pages` or `audit_frontier`.
   - The rule catalogue is code (`@sge/seo-rules`), versioned with the rules that use it.
   - Audits reuse `crawls` and `crawl_pages` as frontier and page store, instead of duplicating them.
+
+## 18. As built (M5)
+
+- **`website_google`** (PK `website_id`, composite FK to `websites`):
+  - the linked Search Console property and GA4 property (with its display name);
+  - per product, the synced date range (`*_synced_from` / `*_synced_through`), the last sync time and the last error.
+- **`gsc_site_daily`** (PK website + date): exact daily totals, including anonymised queries. Holds clicks, impressions and position; CTR is computed when read.
+- **`gsc_dim_daily`** (PK website + date + dimension + value): the same metrics per `device` or `country` (ISO-3, lower case).
+- **`gsc_daily`** (PK website + date + query + page): the top query × page rows (500 per day of a sync window, by clicks). Indexed on `(website_id, lower(query), date)` for the keyword join.
+- **`ga4_daily`** (PK website + date + source + medium + landing page + campaign): sessions, engaged sessions and key events. Up to 1,000 rows per day; duplicate keys are aggregated before insert.
+- **`keywords`**:
+  - unique `(website_id, lower(keyword))`;
+  - `tags text[]`, an `intent` enum, `target_url`;
+  - `volume` and `difficulty` are only filled from imports, with `*_source` set to the user-supplied label.
+- **`integrations`** gains `scopes text[]` and `account_email`. For the `google` provider, `credentials_enc` holds the encrypted refresh token.
+- **`verification_method`** enum gains `gsc`.
+- **Isolation:** every new table has FORCE RLS, `tenant_isolation`, and a RESTRICTIVE `website_visible` policy scoped `TO app_user` (migration 0011). The schema test enforces this.
+- **Deviation from §7:** the tables aren't partitioned yet. Sync writes are idempotent per date window (delete + insert in one transaction), and deleting a website cascades to all its data.

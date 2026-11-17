@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  real,
   pgSchema,
   pgTable,
   text,
@@ -339,7 +340,7 @@ export const membershipClients = pgTable(
 /* ─────────────────────────────── Websites (M2) ──────────────────────────── */
 
 export const verificationStatus = pgEnum("verification_status", ["unverified", "verified"]);
-export const verificationMethod = pgEnum("verification_method", ["dns_txt", "meta_tag", "html_file"]);
+export const verificationMethod = pgEnum("verification_method", ["dns_txt", "meta_tag", "html_file", "gsc"]);
 
 export const websites = pgTable(
   "websites",
@@ -661,11 +662,148 @@ export const integrations = pgTable(
     /** Last characters of the key, for display only. */
     keyHint: text("key_hint"),
     keyVersion: integer("key_version").notNull().default(1),
+    /** OAuth providers: granted scopes and the connected Google account (display only). */
+    scopes: text("scopes").array(),
+    accountEmail: text("account_email"),
     lastError: text("last_error"),
     connectedByUserId: uuid("connected_by_user_id"),
     ...timestamps
   },
   (t) => [unique("integrations_org_provider_uq").on(t.organizationId, t.provider)]
+);
+
+/* ─────────────────────── Google data & keywords (M5) ────────────────────── */
+
+/** Which Google properties feed a website, and how far each sync has got. */
+export const websiteGoogle = pgTable(
+  "website_google",
+  {
+    websiteId: uuid("website_id").primaryKey(),
+    organizationId: uuid("organization_id").notNull(),
+    /** "sc-domain:example.com" or "https://example.com/" */
+    gscProperty: text("gsc_property"),
+    gscSyncedFrom: date("gsc_synced_from"),
+    gscSyncedThrough: date("gsc_synced_through"),
+    gscLastSyncAt: timestamp("gsc_last_sync_at", { withTimezone: true }),
+    gscError: text("gsc_error"),
+    /** "properties/123456789" */
+    ga4Property: text("ga4_property"),
+    ga4PropertyName: text("ga4_property_name"),
+    ga4SyncedFrom: date("ga4_synced_from"),
+    ga4SyncedThrough: date("ga4_synced_through"),
+    ga4LastSyncAt: timestamp("ga4_last_sync_at", { withTimezone: true }),
+    ga4Error: text("ga4_error"),
+    ...timestamps
+  },
+  (t) => [
+    foreignKey({ name: "website_google_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
+);
+
+/** Search Console totals per day (exact; includes anonymised queries). */
+export const gscSiteDaily = pgTable(
+  "gsc_site_daily",
+  {
+    organizationId: uuid("organization_id").notNull(),
+    websiteId: uuid("website_id").notNull(),
+    date: date("date").notNull(),
+    clicks: integer("clicks").notNull(),
+    impressions: integer("impressions").notNull(),
+    position: real("position").notNull()
+  },
+  (t) => [
+    primaryKey({ name: "gsc_site_daily_pk", columns: [t.websiteId, t.date] }),
+    foreignKey({ name: "gsc_site_daily_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
+);
+
+/** Search Console per day by device or country. */
+export const gscDimDaily = pgTable(
+  "gsc_dim_daily",
+  {
+    organizationId: uuid("organization_id").notNull(),
+    websiteId: uuid("website_id").notNull(),
+    date: date("date").notNull(),
+    dimension: text("dimension").notNull(), // device | country
+    value: text("value").notNull(),
+    clicks: integer("clicks").notNull(),
+    impressions: integer("impressions").notNull(),
+    position: real("position").notNull()
+  },
+  (t) => [
+    primaryKey({ name: "gsc_dim_daily_pk", columns: [t.websiteId, t.date, t.dimension, t.value] }),
+    foreignKey({ name: "gsc_dim_daily_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
+);
+
+/** Search Console per day by query and page (top rows; capped per sync window). */
+export const gscDaily = pgTable(
+  "gsc_daily",
+  {
+    organizationId: uuid("organization_id").notNull(),
+    websiteId: uuid("website_id").notNull(),
+    date: date("date").notNull(),
+    query: text("query").notNull(),
+    page: text("page").notNull(),
+    clicks: integer("clicks").notNull(),
+    impressions: integer("impressions").notNull(),
+    position: real("position").notNull()
+  },
+  (t) => [
+    primaryKey({ name: "gsc_daily_pk", columns: [t.websiteId, t.date, t.query, t.page] }),
+    index("gsc_daily_query_idx").on(t.websiteId, sql`lower(${t.query})`, t.date),
+    foreignKey({ name: "gsc_daily_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
+);
+
+/** Google Analytics 4 per day by source / medium / landing page / campaign. */
+export const ga4Daily = pgTable(
+  "ga4_daily",
+  {
+    organizationId: uuid("organization_id").notNull(),
+    websiteId: uuid("website_id").notNull(),
+    date: date("date").notNull(),
+    source: text("source").notNull(),
+    medium: text("medium").notNull(),
+    landingPage: text("landing_page").notNull(),
+    campaign: text("campaign").notNull(),
+    sessions: integer("sessions").notNull(),
+    engagedSessions: integer("engaged_sessions").notNull(),
+    keyEvents: real("key_events").notNull()
+  },
+  (t) => [
+    primaryKey({ name: "ga4_daily_pk", columns: [t.websiteId, t.date, t.source, t.medium, t.landingPage, t.campaign] }),
+    foreignKey({ name: "ga4_daily_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
+);
+
+export const keywordIntent = pgEnum("keyword_intent", ["informational", "navigational", "commercial", "transactional"]);
+
+/** Tracked keywords. Metrics come from GSC; volume/difficulty only if imported (with their source). */
+export const keywords = pgTable(
+  "keywords",
+  {
+    id: id(),
+    organizationId: uuid("organization_id").notNull(),
+    websiteId: uuid("website_id").notNull(),
+    keyword: text("keyword").notNull(),
+    groupName: text("group_name"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    targetUrl: text("target_url"),
+    intent: keywordIntent("intent"),
+    volume: integer("volume"),
+    volumeSource: text("volume_source"),
+    difficulty: integer("difficulty"),
+    difficultySource: text("difficulty_source"),
+    notes: text("notes"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps
+  },
+  (t) => [
+    uniqueIndex("keywords_website_keyword_uq").on(t.websiteId, sql`lower(${t.keyword})`),
+    index("keywords_org_idx").on(t.organizationId),
+    foreignKey({ name: "keywords_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
 );
 
 export type User = typeof users.$inferSelect;
@@ -685,3 +823,5 @@ export type AuditIssue = typeof auditIssues.$inferSelect;
 export type CwvResult = typeof cwvResults.$inferSelect;
 export type OnpageAnalysis = typeof onpageAnalyses.$inferSelect;
 export type Integration = typeof integrations.$inferSelect;
+export type WebsiteGoogle = typeof websiteGoogle.$inferSelect;
+export type Keyword = typeof keywords.$inferSelect;

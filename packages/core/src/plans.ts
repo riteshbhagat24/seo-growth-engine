@@ -79,8 +79,10 @@ async function stockUsage(tx: Tx, organizationId: string, key: LimitKey): Promis
         );
         return m + i;
       }
+      case "keywords":
+        return count(tx.select({ n: sql<number>`count(*)::int` }).from(schema.keywords).where(eq(schema.keywords.organizationId, organizationId)));
       default:
-        return 0; // keywords / backlinks: tables arrive in later milestones
+        return 0; // backlinks: table arrives in a later milestone
     }
   } finally {
     await tx.execute(sql`select set_config('app.client_scope', ${prev}, true)`);

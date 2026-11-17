@@ -39,7 +39,7 @@ export default async function AuditPage({ params }: PageProps<"/w/[slug]/setting
   return (
     <>
       <PageHeader title="Audit log" description="The last 200 security-relevant events in this workspace. Entries can't be edited or deleted." />
-      <Card className="p-0">
+      <Card className="p-0 sm:p-0">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-xs uppercase tracking-wider text-muted">

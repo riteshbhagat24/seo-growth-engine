@@ -39,7 +39,10 @@ test("personal workspace: add a website and see verification instructions", asyn
   await soloPage.getByRole("button", { name: "Add website" }).click();
   await expect(soloPage).toHaveURL(new RegExp(`${base}/websites/[0-9a-f-]{36}$`));
   await expect(soloPage.getByRole("heading", { name: `solo-${stamp}.com` })).toBeVisible();
-  await expect(soloPage.getByText("Not verified")).toBeVisible();
+  await expect(soloPage.getByText("Not verified").first()).toBeVisible();
+  await expect(soloPage.getByText("Set up this website")).toBeVisible();
+  await soloPage.getByRole("link", { name: "Verify", exact: true }).click();
+  await expect(soloPage).toHaveURL(/\/settings#verification$/);
   await expect(soloPage.getByText(/^sge-site-verification=[0-9a-f]{32}$/)).toBeVisible();
   await expect(soloPage.getByText(/<meta name="sge-site-verification" content="[0-9a-f]{32}">/)).toBeVisible();
 });
@@ -79,7 +82,7 @@ test("agency: create a client and add a website for it", async ({ browser }) => 
   await expect(ownerPage.getByLabel("Client")).toHaveValue(/[0-9a-f-]{36}/); // pre-selected
   await ownerPage.getByLabel("Website address").fill(`acme-${stamp}.com`);
   await ownerPage.getByRole("button", { name: "Add website" }).click();
-  await expect(ownerPage.getByText(`https://acme-${stamp}.com · Acme Retail`)).toBeVisible();
+  await expect(ownerPage.getByText("· Acme Retail")).toBeVisible();
   await expect(ownerPage).toHaveURL(/\/websites\/[0-9a-f-]{36}$/);
   clientSiteUrl = new URL(ownerPage.url()).pathname;
 
@@ -106,15 +109,17 @@ test("the client user sees only Acme's website, read-only", async ({ browser }) 
   await page.getByRole("button", { name: "Accept and join" }).click();
   await expect(page).toHaveURL(new RegExp(`${agencyPath}$`));
 
-  await page.getByRole("link", { name: "Websites" }).click();
+  await page.getByRole("link", { name: "Websites", exact: true }).click();
   await expect(page.getByRole("link", { name: `acme-${stamp}.com` })).toBeVisible();
   await expect(page.getByRole("link", { name: `agency-${stamp}.com` })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add website" })).toHaveCount(0);
 
   expect((await page.goto(agencySiteUrl))?.status()).toBe(404); // agency's own site: invisible
   await page.goto(clientSiteUrl);
-  await expect(page.getByText("This website hasn't been verified yet.")).toBeVisible();
+  await expect(page.getByText("Not verified").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0); // no website settings tab
   await expect(page.getByRole("button", { name: /Check/ })).toHaveCount(0);
+  expect((await page.goto(`${clientSiteUrl}/settings`))?.status()).toBe(404);
 
   // No team, usage or audit pages for clients.
   for (const p of ["settings/members", "settings/usage", "settings/audit", "settings"]) {

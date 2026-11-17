@@ -41,8 +41,8 @@ export default async function CrawlPage({ params, searchParams }: PageProps<"/w/
   return (
     <>
       <LiveCrawl url={`/api/w/${slug}/crawls/${crawlId}`} active={active} />
-      <Link href={`/w/${slug}/websites/${websiteId}`} className="text-sm text-muted hover:text-foreground">
-        ← Website
+      <Link href={`/w/${slug}/websites/${websiteId}/audits`} className="text-sm text-muted hover:text-foreground">
+        ← Site audit
       </Link>
       <div className="mt-3">
         <PageHeader
@@ -87,14 +87,14 @@ export default async function CrawlPage({ params, searchParams }: PageProps<"/w/
           </p>
         </Card>
 
-        <Card className="p-0">
+        <Card className="p-0 sm:p-0">
           <nav className="flex flex-wrap gap-1 border-b border-border px-4 py-3 text-sm" aria-label="Filter pages">
             {FILTERS.map((f) => (
               <Link
                 key={f.key}
                 href={f.key === "all" ? base : `${base}?status=${f.key}`}
                 aria-current={filter === f.key ? "page" : undefined}
-                className="rounded-lg px-3 py-1.5 text-muted hover:bg-background hover:text-foreground aria-[current=page]:bg-background aria-[current=page]:font-medium aria-[current=page]:text-foreground"
+                className="rounded-lg px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-foreground aria-[current=page]:bg-surface-2 aria-[current=page]:font-medium aria-[current=page]:text-foreground"
               >
                 {f.label}
               </Link>

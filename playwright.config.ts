@@ -26,6 +26,15 @@ export default defineConfig({
     url: `${BASE_URL}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
-    env: { ...loadEnv("apps/web/.env.local"), NODE_ENV: "production", PORT: String(PORT), APP_URL: BASE_URL, HOSTNAME: "localhost" }
+    env: {
+      ...loadEnv("apps/web/.env.local"),
+      NODE_ENV: "production",
+      PORT: String(PORT),
+      APP_URL: BASE_URL,
+      HOSTNAME: "localhost",
+      // Fake OAuth client: lets e2e check the redirect to Google (Google itself is never called).
+      GOOGLE_CLIENT_ID: "e2e-client.apps.googleusercontent.com",
+      GOOGLE_CLIENT_SECRET: "e2e-not-a-secret"
+    }
   }
 });

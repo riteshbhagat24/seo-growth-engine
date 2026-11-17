@@ -111,7 +111,7 @@ export default async function IssuePage({ params, searchParams }: PageProps<"/w/
             </div>
           </div>
         </Card>
-        <Card className="p-0">
+        <Card className="p-0 sm:p-0">
           {issues.length === 0 ? (
             <p className="p-6 text-sm text-muted">No pages are affected in this audit.</p>
           ) : (

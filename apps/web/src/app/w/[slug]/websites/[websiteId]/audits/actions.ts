@@ -34,7 +34,7 @@ export async function setScheduleAction(slug: string, websiteId: string, _: Acti
     const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
     const frequency = field(data, "frequency") as ScheduleFrequency;
     await setAuditSchedule(db(), actor, access, websiteId, frequency);
-    revalidatePath(sitePath(slug, websiteId));
+    revalidatePath(sitePath(slug, websiteId), "layout");
     return { ok: frequency === "off" ? "Scheduled audits turned off." : `Audits will run ${frequency}.` };
   });
 }
@@ -44,7 +44,7 @@ export async function requestCwvAction(slug: string, websiteId: string, _: Actio
     const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
     await requestCwv(db(), actor, access, websiteId, field(data, "page"));
     processAfterResponse(access.workspace.id);
-    revalidatePath(sitePath(slug, websiteId));
+    revalidatePath(sitePath(slug, websiteId), "layout");
     return { ok: "Measuring… results usually take under a minute." };
   });
 }

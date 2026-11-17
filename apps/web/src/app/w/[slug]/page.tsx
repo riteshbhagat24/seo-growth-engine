@@ -1,7 +1,10 @@
 import Link from "next/link";
-import { ROLE_LABEL, can, latestAuditScores, listWebsites } from "@sge/core";
+import { Globe, Plus, Rocket, Users } from "lucide-react";
+import { can, keywordCounts, latestAuditScores, listWebsites, ROLE_LABEL, workspaceSearchSummary } from "@sge/core";
 import { scoreTone } from "@/components/audit-ui";
-import { Badge, Card, LinkButton, PageHeader } from "@/components/ui";
+import { Step } from "@/components/data-ui";
+import { Badge, Card, CardHeader, Change, EmptyState, fmtCompact, fmtInt, Kpi, LinkButton, PageHeader } from "@/components/ui";
+import { VerificationBadge } from "@/components/verification-badge";
 import { db } from "@/lib/db";
 import { currentActor, requireWorkspace } from "@/lib/session";
 
@@ -10,16 +13,29 @@ export default async function WorkspaceOverview({ params }: PageProps<"/w/[slug]
   const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
   const { workspace: ws, role } = access;
   const isAgency = ws.type === "agency";
-  const [sites, scores] = await Promise.all([listWebsites(db(), actor, access), latestAuditScores(db(), actor, access)]);
+  const [sites, scores, search, kws] = await Promise.all([
+    listWebsites(db(), actor, access),
+    latestAuditScores(db(), actor, access),
+    workspaceSearchSummary(db(), actor, access),
+    keywordCounts(db(), actor, access)
+  ]);
   const verified = sites.filter((s) => s.website.verificationStatus === "verified").length;
+  const healthValues = [...scores.values()].map((s) => s.healthScore).filter((v): v is number => v !== null);
+  const avgHealth = healthValues.length ? Math.round(healthValues.reduce((a, b) => a + b, 0) / healthValues.length) : null;
+  const clicks = [...search.values()].reduce((n, s) => n + s.clicks, 0);
+  const prevClicks = [...search.values()].reduce((n, s) => n + s.prevClicks, 0);
+  const keywordsTracked = [...kws.values()].reduce((a, b) => a + b, 0);
+  const manage = can(role, "websites.manage");
+  const first = sites[0]?.website;
 
   const steps = [
-    { done: true, label: "Create your workspace" },
-    { done: sites.length > 0, label: "Add your first website", href: `/w/${slug}/websites` },
-    { done: verified > 0, label: "Verify ownership of a website", href: sites[0] ? `/w/${slug}/websites/${sites[0].website.id}` : `/w/${slug}/websites` },
-    { done: scores.size > 0, label: "Run a technical SEO audit", href: sites[0] ? `/w/${slug}/websites/${sites[0].website.id}` : `/w/${slug}/websites` },
-    { done: false, label: "Connect Google Search Console", note: "M5" }
+    { done: sites.length > 0, title: "Add your first website", href: `/w/${slug}/websites`, body: "Start with the site you want to grow." },
+    { done: verified > 0, title: "Verify ownership", href: first ? `/w/${slug}/websites/${first.id}/settings#verification` : null, body: "DNS, meta tag, file, or Search Console." },
+    { done: scores.size > 0, title: "Run a technical SEO audit", href: first ? `/w/${slug}/websites/${first.id}/audits` : null, body: "Find what's holding the site back." },
+    { done: search.size > 0, title: "Connect Google Search Console", href: first ? `/w/${slug}/websites/${first.id}/settings#google` : null, body: "Clicks, queries and positions, free." },
+    { done: keywordsTracked > 0, title: "Track keywords", href: first ? `/w/${slug}/websites/${first.id}/keywords` : null, body: "Follow the searches that matter." }
   ];
+  const remaining = steps.filter((s) => !s.done).length;
 
   return (
     <>
@@ -27,80 +43,134 @@ export default async function WorkspaceOverview({ params }: PageProps<"/w/[slug]
         title={ws.name}
         description={isAgency ? "Agency workspace" : "Personal workspace"}
         actions={
-          <div className="flex items-center gap-2">
+          <>
             <Badge>{ROLE_LABEL[role]}</Badge>
             {isAgency && can(role, "members.manage") && (
               <LinkButton href={`/w/${slug}/settings/members`} variant="secondary">
-                Invite teammates
+                <Users className="size-4" aria-hidden /> Invite
               </LinkButton>
             )}
-          </div>
+            {manage && sites.length > 0 && (
+              <LinkButton href={`/w/${slug}/websites`}>
+                <Plus className="size-4" aria-hidden /> Add website
+              </LinkButton>
+            )}
+          </>
         }
       />
-      {scores.size > 0 && (
-        <Card className="mb-6">
-          <h2 className="font-semibold">Site health</h2>
-          <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {sites
-              .filter((s) => scores.has(s.website.id))
-              .map((s) => {
-                const sc = scores.get(s.website.id)!;
+
+      <div className="flex flex-col gap-6">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Kpi label="Websites" value={sites.length} foot={`${verified} verified`} href={`/w/${slug}/websites`} />
+          <Kpi label="Average health" value={<span className={scoreTone(avgHealth)}>{avgHealth ?? "–"}</span>} foot={`${scores.size} audited`} />
+          <Kpi
+            label="Clicks from Google · 28 days"
+            value={search.size ? fmtCompact(clicks) : "–"}
+            change={search.size ? <Change current={clicks} previous={prevClicks} /> : undefined}
+            foot={search.size ? `${search.size} site${search.size === 1 ? "" : "s"} with Search Console` : "Connect Search Console"}
+          />
+          <Kpi label="Keywords tracked" value={fmtInt(keywordsTracked)} />
+        </div>
+
+        {remaining > 0 && (
+          <Card>
+            <CardHeader icon={<Rocket className="size-4" />} title="Getting started" description={`${steps.length - remaining} of ${steps.length} done`} />
+            <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+              <div className="h-full rounded-full bg-success" style={{ width: `${((steps.length - remaining) / steps.length) * 100}%` }} />
+            </div>
+            <ol className="divide-y divide-border">
+              {steps.map((s) => (
+                <Step
+                  key={s.title}
+                  done={s.done}
+                  title={s.title}
+                  action={
+                    s.href ? (
+                      <Link href={s.href} className="text-sm font-medium text-brand hover:underline" aria-label={s.title}>
+                        Start
+                      </Link>
+                    ) : null
+                  }
+                >
+                  {s.body}
+                </Step>
+              ))}
+            </ol>
+          </Card>
+        )}
+
+        {sites.length === 0 ? (
+          <EmptyState icon={<Globe className="size-5" />} title="No websites yet">
+            {manage ? "Add a website to audit it, track keywords and connect Google data." : "No websites have been shared with you yet."}
+          </EmptyState>
+        ) : (
+          <section aria-labelledby="sites-heading">
+            <h2 id="sites-heading" className="mb-3 font-semibold">
+              Site health
+            </h2>
+            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {sites.map(({ website: w, clientName }) => {
+                const sc = scores.get(w.id);
+                const se = search.get(w.id);
                 return (
-                  <li key={s.website.id}>
-                    <Link href={`/w/${slug}/websites/${s.website.id}/audits/${sc.auditId}`} className="flex items-center gap-4 rounded-xl border border-border p-3 hover:bg-background">
-                      <span className={`text-2xl font-semibold tabular-nums ${scoreTone(sc.healthScore)}`}>{sc.healthScore ?? "–"}</span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{s.website.displayName ?? s.website.domain}</span>
-                        <span className="block text-xs text-muted">{sc.critical} critical issue{sc.critical === 1 ? "" : "s"}</span>
-                      </span>
+                  <li key={w.id}>
+                    <Link
+                      href={`/w/${slug}/websites/${w.id}`}
+                      className="block h-full rounded-xl border border-border bg-surface p-4 shadow-card transition hover:border-border-strong hover:bg-surface-2"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">{w.displayName ?? w.domain}</div>
+                          <div className="truncate text-xs text-subtle">{clientName ?? w.domain}</div>
+                        </div>
+                        <VerificationBadge status={w.verificationStatus} />
+                      </div>
+                      <dl className="mt-4 grid grid-cols-3 gap-2 text-sm">
+                        <div>
+                          <dt className="text-xs text-muted">Health</dt>
+                          <dd className={`text-lg font-semibold tabular-nums ${scoreTone(sc?.healthScore ?? null)}`}>{sc?.healthScore ?? "–"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-muted">Clicks 28d</dt>
+                          <dd className="text-lg font-semibold tabular-nums">{se ? fmtCompact(se.clicks) : "–"}</dd>
+                          {se && (
+                            <dd className="-mt-0.5">
+                              <Change current={se.clicks} previous={se.prevClicks} />
+                            </dd>
+                          )}
+                        </div>
+                        <div>
+                          <dt className="text-xs text-muted">Keywords</dt>
+                          <dd className="text-lg font-semibold tabular-nums">{kws.get(w.id) ?? 0}</dd>
+                        </div>
+                      </dl>
+                      {sc && sc.critical > 0 && (
+                        <p className="mt-2 text-xs text-danger">
+                          {sc.critical} critical issue{sc.critical === 1 ? "" : "s"}
+                        </p>
+                      )}
                     </Link>
                   </li>
                 );
               })}
-          </ul>
-        </Card>
-      )}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <h2 className="font-semibold">Getting started</h2>
-          <ol className="mt-4 flex flex-col gap-3">
-            {steps.map((s) => (
-              <li key={s.label} className="flex items-start gap-3 text-sm">
-                <span
-                  aria-hidden
-                  className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border text-[11px] ${
-                    s.done ? "border-success bg-success text-white" : "border-border text-muted"
-                  }`}
-                >
-                  {s.done ? "✓" : ""}
-                </span>
-                <span>
-                  {"href" in s && s.href && !s.done ? (
-                    <Link href={s.href} className="text-brand hover:underline">
-                      {s.label}
-                    </Link>
-                  ) : (
-                    <span className={s.done ? "text-muted line-through" : ""}>{s.label}</span>
-                  )}
-                  {"note" in s && s.note && <span className="ml-2 text-xs text-muted">({s.note})</span>}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </Card>
-        <Card>
-          <h2 className="font-semibold">{isAgency ? "Your agency" : "Working with a team?"}</h2>
-          <p className="mt-2 text-sm text-muted">
-            {isAgency
-              ? "Invite teammates, set their roles, and soon add clients with their own read-only dashboards."
-              : "Personal workspaces are just for you. Create an agency workspace to invite teammates and manage clients."}
-          </p>
-          {!isAgency && (
-            <LinkButton href="/workspaces/new" variant="secondary" className="mt-4">
-              New agency workspace
-            </LinkButton>
-          )}
-        </Card>
+            </ul>
+          </section>
+        )}
+
+        {!isAgency && (
+          <Card className="bg-surface-2">
+            <CardHeader
+              icon={<Users className="size-4" />}
+              title="Working with a team or clients?"
+              description="Personal workspaces are just for you. An agency workspace adds teammates, roles and client-scoped access."
+              actions={
+                <LinkButton href="/workspaces/new" variant="secondary">
+                  New agency workspace
+                </LinkButton>
+              }
+            />
+          </Card>
+        )}
       </div>
     </>
   );

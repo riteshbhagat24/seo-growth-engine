@@ -24,10 +24,7 @@ export default async function OnPageIndex({ params, searchParams }: PageProps<"/
 
   return (
     <>
-      <Link href={`/w/${slug}/websites/${websiteId}`} className="text-sm text-muted hover:text-foreground">
-        ← {w.displayName ?? w.domain}
-      </Link>
-      <div className="mt-3">
+      <div>
         <PageHeader
           title="On-page analysis"
           description="Score one page against the keyword it should rank for: placement, content, meta tags, links and technical basics. Runs on our own engine; no external APIs."
@@ -47,7 +44,7 @@ export default async function OnPageIndex({ params, searchParams }: PageProps<"/
             </ActionForm>
           </Card>
         )}
-        <Card className="p-0">
+        <Card className="p-0 sm:p-0">
           <h2 className="border-b border-border px-6 py-4 font-semibold">Recent analyses</h2>
           {history.length === 0 ? (
             <p className="p-6 text-sm text-muted">No analyses yet.</p>
@@ -55,7 +52,7 @@ export default async function OnPageIndex({ params, searchParams }: PageProps<"/
             <ul className="divide-y divide-border text-sm">
               {history.map((h) => (
                 <li key={h.id}>
-                  <Link href={`/w/${slug}/websites/${websiteId}/onpage/${h.id}`} className="flex items-center gap-4 px-6 py-3 hover:bg-background">
+                  <Link href={`/w/${slug}/websites/${websiteId}/onpage/${h.id}`} className="flex items-center gap-4 px-6 py-3 hover:bg-surface-2">
                     <span className={`w-10 text-right text-lg font-semibold tabular-nums ${scoreTone(h.score)}`}>{h.score}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">{new URL(h.url).pathname}</span>

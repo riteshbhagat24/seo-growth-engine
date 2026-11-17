@@ -156,3 +156,20 @@ Data export per workspace (JSON/CSV), workspace deletion (soft delete for 30 day
   - the CSV export prefixes cells that start with `= + - @` (or a tab or carriage return) with `'`, so spreadsheet formula injection doesn't work (tested).
 - **Verified status is kept honest**: verified sites are re-checked weekly. Two consecutive failures remove the verified status (and with it the higher crawl limit), and an audit-log entry is written.
 - **Usage metering**: PageSpeed runs (`psi_runs_month`) and on-page fetches (`pages_crawled_month`) are counted against the plan before any work happens.
+
+## 15. Implementation notes (M5)
+
+- **Google OAuth (data access):**
+  - **Scopes:** read-only `webmasters.readonly` and `analytics.readonly`, plus `openid email`.
+  - **PKCE (S256)** plus a 192-bit random `state`. The state and verifier are kept in a cookie that is HMAC-signed with the auth secret, httpOnly, `SameSite=Lax`, scoped to `/api/integrations/google`, valid for 10 minutes, and cleared on every callback (single use).
+  - **The callback checks:**
+    - the state, compared in constant time;
+    - that the signed-in user is the one who started the flow;
+    - that the user is a workspace member with `integrations.manage`.
+  - **The refresh token** is stored encrypted (AES-256-GCM, bound to `<org>:google`) and never sent to the browser. Disconnecting revokes it at Google.
+  - **Access tokens** are obtained per job run and never stored.
+  - Tested: forged state, replayed callback, missing offline access, revoked token, and a viewer trying to connect.
+- **Properties:** Search Console and GA4 choices are re-validated against the connected account on save, and Search Console properties must match the website's domain. A GA4 property id must match `properties/<digits>` before it is used in a URL.
+- **Verification via Search Console** requires the `siteOwner` or `siteFullUser` permission level and is re-checked weekly. Losing it twice removes the verified status.
+- **Keywords import:** CSV files are capped at 2 MB and 5,000 rows. Target URLs must be http(s) on the website's own domain, and imported metric labels are free text, stored escaped.
+- **E2E tests** seed Google-like data with the local Postgres superuser, in test databases only. The app never uses that role.

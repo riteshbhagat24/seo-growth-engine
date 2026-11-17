@@ -88,7 +88,7 @@ export default async function MembersPage({ params }: PageProps<"/w/[slug]/setti
           </Card>
         )}
 
-        <Card className="p-0">
+        <Card className="p-0 sm:p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-border text-xs uppercase tracking-wider text-muted">

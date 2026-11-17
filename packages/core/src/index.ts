@@ -16,3 +16,6 @@ export * from "./cwv";
 export * from "./onpage";
 export * from "./maintenance";
 export * from "./jobs";
+export * from "./google";
+export * from "./searchdata";
+export * from "./keywords";

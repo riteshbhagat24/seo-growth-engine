@@ -15,7 +15,7 @@ export default async function JobsPage({ params }: PageProps<"/w/[slug]/settings
   return (
     <>
       <PageHeader title="Background jobs" description="The last 100 background tasks in this workspace, such as crawls, audits and Core Web Vitals tests." />
-      <Card className="p-0">
+      <Card className="p-0 sm:p-0">
         {rows.length === 0 ? (
           <p className="p-6 text-sm text-muted">No background jobs yet.</p>
         ) : (

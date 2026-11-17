@@ -2,6 +2,8 @@ import { and, eq, schema, sql, withContext, type Tx } from "@sge/db";
 import type { JobHandler } from "@sge/jobs";
 import { audit } from "./audit";
 import { assertId } from "./context";
+import { defaultGoogleDeps, type GoogleDeps } from "./google";
+import { gscStillOwned } from "./searchdata";
 import { checkOwnership, defaultVerificationDeps, REVERIFY_JOB, type VerificationDeps } from "./websites";
 
 const { websites, schedules } = schema;
@@ -13,7 +15,7 @@ export { REVERIFY_JOB, REVERIFY_INTERVAL_MINUTES, scheduleReverification } from 
  * recorded as a warning; two in a row remove the verified status (so a site
  * that changes hands can't keep verified-only privileges).
  */
-export function createReverifyHandler(deps: VerificationDeps = defaultVerificationDeps): JobHandler {
+export function createReverifyHandler(deps: VerificationDeps = defaultVerificationDeps, googleDeps: GoogleDeps = defaultGoogleDeps): JobHandler {
   return async ({ job, appDb }) => {
     const org = job.organizationId!;
     const websiteId = String(job.websiteId ?? job.payload.websiteId ?? "");
@@ -24,7 +26,8 @@ export function createReverifyHandler(deps: VerificationDeps = defaultVerificati
       if (w) await t((tx) => tx.update(schedules).set({ enabled: false }).where(and(eq(schedules.websiteId, websiteId), eq(schedules.jobType, REVERIFY_JOB))));
       return { done: true };
     }
-    const reason = await checkOwnership(w.verificationMethod, w, deps);
+    const reason =
+      w.verificationMethod === "gsc" ? await gscStillOwned(appDb, org, w.id, googleDeps) : await checkOwnership(w.verificationMethod, w, deps);
     await t(async (tx) => {
       if (reason === null) {
         await tx.update(websites).set({ lastVerificationError: null, lastVerificationAt: new Date() }).where(eq(websites.id, w.id));

@@ -53,8 +53,8 @@ export default async function AuditPage({ params, searchParams }: PageProps<"/w/
   return (
     <>
       <LiveCrawl url={`/api/w/${slug}/audits/${auditId}`} active={active} activeStatuses={ACTIVE_AUDIT} />
-      <Link href={`/w/${slug}/websites/${websiteId}`} className="text-sm text-muted hover:text-foreground">
-        ← Website
+      <Link href={`/w/${slug}/websites/${websiteId}/audits`} className="text-sm text-muted hover:text-foreground">
+        ← All audits
       </Link>
       <div className="mt-3">
         <PageHeader
@@ -129,7 +129,7 @@ export default async function AuditPage({ params, searchParams }: PageProps<"/w/
                 </p>
               )}
               <div className="mt-5 flex flex-wrap gap-2">
-                <a href={`/api/w/${slug}/audits/${auditId}/csv`} className="inline-flex h-10 items-center rounded-lg border border-border bg-surface px-4 text-sm font-medium hover:bg-background">
+                <a href={`/api/w/${slug}/audits/${auditId}/csv`} className="inline-flex h-10 items-center rounded-lg border border-border bg-surface px-4 text-sm font-medium hover:bg-surface-2">
                   Download issues (CSV)
                 </a>
                 <LinkButton variant="ghost" href={`/w/${slug}/websites/${websiteId}/crawls/${crawl.id}`}>
@@ -138,7 +138,7 @@ export default async function AuditPage({ params, searchParams }: PageProps<"/w/
               </div>
             </Card>
 
-            <Card className="p-0">
+            <Card className="p-0 sm:p-0">
               <div className="flex flex-col gap-3 border-b border-border px-4 py-3">
                 <nav className="flex flex-wrap gap-1 text-sm" aria-label="Filter by severity">
                   {SEVERITIES.map((s) => (
@@ -146,7 +146,7 @@ export default async function AuditPage({ params, searchParams }: PageProps<"/w/
                       key={s.key}
                       href={qs({ severity: s.key })}
                       aria-current={severity === s.key ? "page" : undefined}
-                      className="rounded-lg px-3 py-1.5 text-muted hover:bg-background hover:text-foreground aria-[current=page]:bg-background aria-[current=page]:font-medium aria-[current=page]:text-foreground"
+                      className="rounded-lg px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-foreground aria-[current=page]:bg-surface-2 aria-[current=page]:font-medium aria-[current=page]:text-foreground"
                     >
                       {s.label}
                     </Link>

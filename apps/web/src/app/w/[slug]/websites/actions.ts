@@ -27,7 +27,7 @@ export async function updateWebsiteAction(slug: string, websiteId: string, _: Ac
       displayName: field(data, "displayName"),
       ...(data.has("clientId") ? { clientId: field(data, "clientId") || null } : {})
     });
-    revalidatePath(`/w/${slug}/websites/${websiteId}`);
+    revalidatePath(`/w/${slug}/websites/${websiteId}`, "layout");
     return { ok: "Saved." };
   });
 }
@@ -38,7 +38,7 @@ export async function verifyWebsiteAction(slug: string, websiteId: string, _: Ac
     const method = field(data, "method");
     if (!["dns_txt", "meta_tag", "html_file"].includes(method)) throw new AppError("invalid_input", "Choose a verification method");
     const r = await verifyWebsite(db(), actor, access, websiteId, method as VerificationMethod);
-    revalidatePath(`/w/${slug}/websites/${websiteId}`);
+    revalidatePath(`/w/${slug}/websites/${websiteId}`, "layout");
     revalidatePath(`/w/${slug}/websites`);
     return r.verified ? { ok: "Verified. You own this website." } : { error: r.reason ?? "Verification failed" };
   });

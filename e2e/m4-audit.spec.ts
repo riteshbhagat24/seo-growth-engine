@@ -32,13 +32,14 @@ test("sign up and add a website", async ({ browser }) => {
   await page.getByRole("button", { name: "Add website" }).click();
   await expect(page.getByRole("heading", { name: "example.com" })).toBeVisible();
   websiteUrl = page.url();
-  await expect(page.getByRole("heading", { name: "Technical SEO audit" })).toBeVisible();
+  await expect(page.getByText("Set up this website")).toBeVisible();
 });
 
 test("run an audit and watch it complete in the background", async () => {
   test.skip(!!process.env.E2E_SKIP_NETWORK, "network-dependent");
   test.setTimeout(180_000);
   await page.goto(websiteUrl);
+  await page.getByRole("link", { name: "Site audit" }).click();
   await page.getByRole("button", { name: "Run first audit" }).click();
   await expect(page).toHaveURL(/\/audits\/[0-9a-f-]{36}$/);
   await expect(page.getByText("audits cover up to 25 pages")).toBeVisible(); // unverified
@@ -68,7 +69,9 @@ test("run an audit and watch it complete in the background", async () => {
 
   // Score shows on the website page and the overview.
   await page.goto(websiteUrl);
-  await expect(page.getByText("Health", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Top issues" })).toBeVisible();
+  await page.goto(`${websiteUrl}/audits`);
+  await expect(page.getByRole("cell", { name: "Completed" })).toBeVisible();
   await page.goto(workspaceBase);
   await expect(page.getByRole("heading", { name: "Site health" })).toBeVisible();
 
@@ -79,7 +82,7 @@ test("run an audit and watch it complete in the background", async () => {
 });
 
 test("schedule automatic audits", async () => {
-  await page.goto(websiteUrl);
+  await page.goto(`${websiteUrl}/audits`);
   await page.getByLabel("Automatic audits").selectOption("weekly");
   await page.getByRole("button", { name: "Save schedule" }).click();
   await expect(page.getByText("Audits will run weekly.")).toBeVisible();
@@ -89,7 +92,7 @@ test("schedule automatic audits", async () => {
 test("analyse a page against a keyword", async () => {
   test.skip(!!process.env.E2E_SKIP_NETWORK, "network-dependent");
   await page.goto(websiteUrl);
-  await page.getByRole("link", { name: "Analyse a page" }).click();
+  await page.getByRole("link", { name: "On-page" }).click();
   await page.getByLabel("Target keyword").fill("example domain");
   await page.getByRole("button", { name: "Analyse page" }).click();
   await expect(page).toHaveURL(/\/onpage\/[0-9a-f-]{36}$/);
@@ -107,7 +110,8 @@ test("analyse a page against a keyword", async () => {
 
 test("store a PageSpeed API key encrypted, then remove it", async () => {
   await page.goto(`${workspaceBase}/settings/integrations`);
-  await expect(page.getByText("Not connected")).toBeVisible();
+  const psi = page.locator("section").filter({ hasText: "Google PageSpeed Insights" });
+  await expect(psi.getByText("Not connected")).toBeVisible();
   await page.getByLabel("API key").fill("AIzaSyE2E_test_key_abcdefghij1234");
   await page.getByRole("button", { name: "Save key" }).click();
   await expect(page.getByText(/Key saved/)).toBeVisible();
@@ -117,5 +121,5 @@ test("store a PageSpeed API key encrypted, then remove it", async () => {
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Remove key" }).click();
   await expect(page.getByText("Key removed.")).toBeVisible();
-  await expect(page.getByText("Not connected")).toBeVisible();
+  await expect(psi.getByText("Not connected")).toBeVisible();
 });
