@@ -24,8 +24,11 @@ export async function GET() {
       from pg_roles r where r.rolname = current_user`);
     role = r.rows[0];
   } catch (err) {
-    console.error("[health] database error:", (err as Error).message);
-    return Response.json({ status: "degraded", config: "ok", database: "unreachable" }, { status: 503 });
+    console.error("[health] database error:", (err as Error).message, (err as { cause?: unknown }).cause);
+    // Only a code (e.g. 28P01, ENOTFOUND, ETIMEDOUT): useful for diagnosis, reveals no secrets.
+    const e = err as { code?: string; cause?: { code?: string; errno?: string } };
+    const code = e.cause?.code ?? e.code ?? e.cause?.errno ?? "unknown";
+    return Response.json({ status: "degraded", config: "ok", database: "unreachable", code: String(code).slice(0, 20) }, { status: 503 });
   }
 
   // Tenant isolation depends on the runtime role being unprivileged.
