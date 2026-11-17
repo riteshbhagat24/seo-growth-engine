@@ -194,9 +194,85 @@ Known gaps / remaining work:
 - **Vercel Hobby cron runs only once a day.** For frequent processing on the demo, either rely on `after()` processing (in place), or point a free external scheduler such as cron-job.org at `/api/cron/tick` every 5 minutes.
 - **Compressed sitemaps (`.xml.gz`)** aren't read yet; links still get crawled.
 
-## Next: M4 — Technical audit & on-page analysis
+## M4 — Technical audit & on-page analysis ✅ (2026-11-17)
 
-Audit rule engine over crawled pages (status codes, redirects, canonicals, titles/meta, headings, images, indexability, duplicates, orphans, sitemap/robots checks), health score, issues UI, PageSpeed Insights / CrUX Core Web Vitals, and the on-page analyzer.
+This completes the first release real users could try (M1–M4).
+
+Implemented:
+- **`@sge/seo-rules` (new, pure, no I/O):**
+  - **Rule catalogue:** 54 rules in 10 categories, each with a severity, an explanation and how to fix it.
+    - **Crawlability:** 4xx/5xx, fetch failures, redirect chains, temporary redirects, robots.txt (missing, blocking pages or the homepage), meta refresh, page limit reached.
+    - **Indexability:** noindex/nofollow, canonical missing, pointing elsewhere, broken or redirected, or duplicated.
+    - **Links:** broken internal and external links, links to redirects, orphan pages (in the sitemap with no inlinks), click depth of 4 or more, internal nofollow, internal http links.
+    - **Content:** title (missing, too long or short, multiple, duplicate), meta description (missing, length, multiple, duplicate), H1 (missing or multiple), thin content, duplicate content, image alt text.
+    - **Performance:** slow response, large HTML, URL hygiene.
+    - **Security:** HTTPS, mixed content.
+    - **Mobile:** viewport.
+    - **International:** lang attribute, hreflang validity and return links.
+    - **Structured data:** JSON-LD validity and presence, Open Graph.
+    - **Sitemaps:** sitemap missing, sitemap listing bad URLs, noindex pages in the sitemap.
+  - **Engine:** `runAudit()` builds the link graph (inlinks and click depth by breadth-first search from the homepage) and gives the health score.
+    - Each page counts 1 (no issues or only notices), 0.5 (a warning) or 0 (anything critical).
+    - The score is the average of those page values, minus 10 for each site-wide critical issue and 3 for each site-wide warning.
+  - **Audit comparison:** `compareIssues()` reports new and fixed issues per rule.
+  - **On-page analyser:** `analyzeOnPage()` runs 24 weighted checks covering keyword placement, density and stuffing, content length, Flesch readability (English pages), headings, meta lengths, links in and out, image alts, schema, canonical, indexability, HTTPS and viewport. It also builds a search-result preview.
+  - **PageSpeed parser:** lab metrics, CrUX field data (page or origin), opportunities, and Google's Core Web Vitals thresholds.
+- **`@sge/crawler`:**
+  - `extractSeo()` reads every signal the rules need: titles, meta tags, robots meta and the X-Robots-Tag header, canonical tags, hreflang, JSON-LD and microdata, Open Graph, images and alt text, followed and nofollow internal and external links, mixed content, visible-text word count and a content hash.
+  - `safeFetch` now returns the status code of each redirect hop and the X-Robots-Tag header.
+- **Audits (`@sge/core`):**
+  - **Each audit has three phases:**
+    1. Crawl (the existing M3 crawler, now storing each page's SEO data and redirect chain).
+    2. External link check: up to 300 links (25 for unverified sites), one request per host at a time; only 400/404/410/5xx and DNS failures count as broken, while 401/403/429/503 are "unverifiable".
+    3. Analysis: issues, inlinks and click depth stored in one transaction.
+  - **Background jobs:** every phase is resumable and runs on the M3 queue.
+  - **Workflow:** start, stop, history, comparison with the previous audit, issue drill-down with pagination, and CSV export (with spreadsheet formula injection neutralised).
+  - **Weekly or monthly scheduled audits** via `schedules`.
+  - **Retention:** the newest 10 audits per website are kept.
+- **Core Web Vitals:**
+  - Mobile and desktop PageSpeed Insights runs as background jobs.
+  - Metered by the new plan limit `psi_runs_month`: Free 20, Pro 200, Agency Free 50, Agency 1000.
+  - Uses the optional platform key `PSI_API_KEY` (or no key), unless the workspace has added its own free key.
+  - Google's 429 rate-limit and 5xx responses are retried; failures are explained in plain language.
+- **Integrations:** workspace API keys are stored encrypted with AES-256-GCM (`ENCRYPTION_KEY`, bound to workspace and provider). Only the last 4 characters are ever shown. Owners and admins can set or remove keys.
+- **Periodic ownership re-check:** verifying a site schedules a weekly re-check. One failed re-check shows a warning; two in a row remove the verified status and write an audit-log entry.
+- **UI:**
+  - **Website page:** audit card (latest score, trend sparkline, history, schedule), Core Web Vitals card (lab and real-user tables, opportunities) and an on-page link.
+  - **Audit page:** live progress through its 3 steps, score ring, severity counts, changes since the previous audit, filters by severity and category, a "fixed since last audit" list, CSV export and the crawled pages.
+  - **Issue page:** why it matters, how to fix it, and affected URLs with details.
+  - **On-page:** analyse form, history, and a result page with the score, search-result preview, grouped checks and "what we read".
+  - **Elsewhere:** Settings → Integrations; a Health column on the websites list; a site-health panel and audit step on the overview; job labels.
+- **Database:**
+  - New tables: `audits`, `audit_issues`, `audit_external_links`, `cwv_results`, `onpage_analyses`, `integrations`.
+  - New `crawl_pages` columns: `seo`, `redirects`, `inlinks`, `click_depth`.
+  - Isolation: forced row-level security plus "website visible" / "audit visible" restrictive policies (migrations 0008 and 0009).
+
+Verified (local, 2026-11-17):
+| Check | Result |
+|---|---|
+| Typecheck (8 packages) and lint | ✅ |
+| `@sge/seo-rules`: a 25-URL fixture site where every URL's issue set must match exactly; site-level rules; scoring; comparison; on-page (well-optimised page scores 100, stuffing, non-English); readability; PSI parsing | ✅ 48/48 |
+| `@sge/crawler` (+ `extractSeo` on a dense HTML fixture, redirect status codes and X-Robots-Tag via the fixture server) | ✅ 87/87 |
+| `@sge/core` (+ full audit through the queue against an in-memory site and fake external sites, comparison after fixes, CSV injection, cancel, roles, client scope, cross-workspace and raw-SQL isolation of all 6 new tables, schedules, retention, Core Web Vitals with platform/workspace key/429 retries/limits, on-page with robots/off-site/404, encryption, two-strike re-verification) | ✅ 198/198 |
+| `@sge/db` schema invariants (forced RLS and tenant policy on every table) | ✅ 12/12 |
+| `@sge/jobs` | ✅ 11/11 |
+| Playwright e2e: M1 12, M2 7, M3 1 (cron), M4 5 (real audit of example.com with live refresh, issue drill-down, CSV, crawl, overview, jobs; schedule; on-page analysis plus off-site refusal; encrypted key set/remove) | ✅ 25/25 (twice in a row) |
+
+Bugs and issues caught while testing:
+- **Redirected URLs analysed twice:** a redirect's content was analysed under both the redirecting URL and its destination, causing false "duplicate title" issues. Pages are now analysed once per final URL.
+- **Integrations page messages:** after removing a key, the confirmation disappeared while the earlier "Key saved" message stayed. Both messages are now page-level.
+- **Test server dropped once:** one full browser-test run lost the test server partway through. It couldn't be reproduced in two later full runs.
+
+Known gaps / remaining work:
+- **Core Web Vitals only via PageSpeed:** real-user data comes from the CrUX data inside the PageSpeed response; there's no separate CrUX API call (it would need a key and adds little). The browser tests don't call Google, which is covered with recorded responses.
+- **Page limits:** audits cover up to 500 pages (25 unverified). Links to pages beyond the limit aren't checked.
+- **Rules in code:** the rule catalogue lives in `@sge/seo-rules`, not in an `audit_rules` table (see DATABASE_DESIGN §17).
+- **Not built yet:** JavaScript rendering (no headless browser, by design), gzipped sitemaps, image file-size checks, and PDF reports (M10).
+- **Demo database:** apply the M4 migrations to Neon with `node scripts/neon-setup.mjs` before deploying this version.
+
+## Next: M5 — Google integrations & keywords
+
+Google OAuth (tokens encrypted with the M4 secrets helper), Search Console sync and backfill, GA4 sync, the keywords module, and dashboards.
 
 ## Seed directory dataset (draft, needs review)
 

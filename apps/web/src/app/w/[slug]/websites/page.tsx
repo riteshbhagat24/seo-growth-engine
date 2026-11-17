@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { can, listClients, listWebsites } from "@sge/core";
+import { can, latestAuditScores, listClients, listWebsites } from "@sge/core";
+import { scoreTone } from "@/components/audit-ui";
 import { ActionForm, SubmitButton } from "@/components/form";
 import { Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { VerificationBadge } from "@/components/verification-badge";
@@ -13,9 +14,10 @@ export default async function WebsitesPage({ params, searchParams }: PageProps<"
   const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
   const isAgency = access.workspace.type === "agency";
   const manage = can(access.role, "websites.manage");
-  const [rows, clients] = await Promise.all([
+  const [rows, clients, scores] = await Promise.all([
     listWebsites(db(), actor, access),
-    isAgency ? listClients(db(), actor, access) : Promise.resolve([])
+    isAgency ? listClients(db(), actor, access) : Promise.resolve([]),
+    latestAuditScores(db(), actor, access)
   ]);
   const preselect = typeof sp.client === "string" ? sp.client : "";
 
@@ -66,6 +68,7 @@ export default async function WebsitesPage({ params, searchParams }: PageProps<"
                     <th className="px-6 py-3 font-medium">Website</th>
                     {isAgency && <th className="px-6 py-3 font-medium">Client</th>}
                     <th className="px-6 py-3 font-medium">Ownership</th>
+                    <th className="px-6 py-3 text-right font-medium">Health</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -80,6 +83,9 @@ export default async function WebsitesPage({ params, searchParams }: PageProps<"
                       {isAgency && <td className="px-6 py-3 text-muted">{clientName ?? "Agency"}</td>}
                       <td className="px-6 py-3">
                         <VerificationBadge status={w.verificationStatus} />
+                      </td>
+                      <td className={`px-6 py-3 text-right font-semibold tabular-nums ${scoreTone(scores.get(w.id)?.healthScore ?? null)}`}>
+                        {scores.get(w.id)?.healthScore ?? <span className="font-normal text-muted">—</span>}
                       </td>
                     </tr>
                   ))}

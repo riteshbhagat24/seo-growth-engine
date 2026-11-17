@@ -137,3 +137,22 @@ Data export per workspace (JSON/CSV), workspace deletion (soft delete for 30 day
   - **Requests** go through `safeFetch` (SSRF protection) with an identifying User-Agent.
 - **The cron endpoint** requires `Authorization: Bearer CRON_SECRET` (constant-time compare) and is otherwise 401. The crawl progress endpoint requires a session and workspace membership. Member-triggered processing (`after()`) only claims that member's workspace's jobs.
 - **The worker** uses a role that can't read tenant or identity tables; tenant work runs under RLS in the job's own workspace.
+
+## 14. Implementation notes (M4)
+
+- **Secrets at rest**:
+  - workspace API keys use AES-256-GCM with a random 96-bit IV and `ENCRYPTION_KEY` (32 bytes);
+  - the additional authenticated data binds each ciphertext to its workspace and provider;
+  - tampering, the wrong workspace or the wrong key all fail to decrypt (tested);
+  - keys are never sent back to the browser: only `…last4` is shown, and the settings page HTML is checked for this in e2e;
+  - only owners and admins can set or remove keys, and every change is audit-logged.
+- **Outbound requests**: crawling, external link checks and on-page fetches all go through `safeFetch` (SSRF protection), and on-page analysis respects robots.txt.
+  - **External link checks**: one request per host at a time, 8 s timeout, 256 KB body cap.
+  - **On-page analysis**: refuses URLs outside the website's domain, and pages that redirect off-site.
+  - **PageSpeed**: requests go only to Google's fixed endpoint, for URLs on the workspace's own website.
+- **Untrusted crawled content**:
+  - URLs found on crawled pages are rendered as links only when they are http(s), with `rel="noreferrer noopener nofollow"`;
+  - everything else is shown as text, and React escapes all text;
+  - the CSV export prefixes cells that start with `= + - @` (or a tab or carriage return) with `'`, so spreadsheet formula injection doesn't work (tested).
+- **Verified status is kept honest**: verified sites are re-checked weekly. Two consecutive failures remove the verified status (and with it the higher crawl limit), and an audit-log entry is written.
+- **Usage metering**: PageSpeed runs (`psi_runs_month`) and on-page fetches (`pages_crawled_month`) are counted against the plan before any work happens.

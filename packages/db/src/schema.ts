@@ -231,6 +231,8 @@ export interface PlanLimits {
   keywords: number;
   backlinks_monitored: number;
   reports_month: number;
+  /** Core Web Vitals measurements (PageSpeed Insights runs) per month. */
+  psi_runs_month: number;
 }
 export type LimitKey = keyof PlanLimits;
 
@@ -498,6 +500,13 @@ export const crawlPages = pgTable(
     linksOut: integer("links_out"),
     skipReason: text("skip_reason"),
     error: text("error"),
+    /** Redirect hops: target URLs and their status codes (M4). */
+    redirects: jsonb("redirects").$type<{ urls: string[]; statuses: number[] }>(),
+    /** SEO signals extracted from the HTML (M4; see @sge/crawler PageSeo). */
+    seo: jsonb("seo").$type<Record<string, unknown>>(),
+    /** Computed by the audit: internal pages linking here, clicks from the start page. */
+    inlinks: integer("inlinks"),
+    clickDepth: integer("click_depth"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }),
     createdAt
   },
@@ -512,6 +521,153 @@ export const crawlPages = pgTable(
   ]
 );
 
+/* ───────────────────────── Audits & on-page (M4) ────────────────────────── */
+
+export const auditStatus = pgEnum("audit_status", ["crawling", "checking_links", "analyzing", "completed", "failed", "cancelled"]);
+export const issueSeverity = pgEnum("issue_severity", ["critical", "warning", "notice"]);
+
+/** A technical audit: one crawl plus the analysis of it. */
+export const audits = pgTable(
+  "audits",
+  {
+    id: id(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    websiteId: uuid("website_id").notNull(),
+    crawlId: uuid("crawl_id").notNull(),
+    status: auditStatus("status").notNull().default("crawling"),
+    trigger: text("trigger").notNull().default("manual"), // manual | schedule
+    healthScore: integer("health_score"),
+    pagesAnalyzed: integer("pages_analyzed").notNull().default(0),
+    critical: integer("critical").notNull().default(0),
+    warning: integer("warning").notNull().default(0),
+    notice: integer("notice").notNull().default(0),
+    /** Issue counts per rule code, plus stats. */
+    summary: jsonb("summary").$type<{ rules: Record<string, number>; stats: Record<string, number> }>(),
+    externalLinksChecked: integer("external_links_checked").notNull().default(0),
+    error: text("error"),
+    createdByUserId: uuid("created_by_user_id"),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    ...timestamps
+  },
+  (t) => [
+    unique("audits_id_org_uq").on(t.id, t.organizationId),
+    unique("audits_crawl_uq").on(t.crawlId),
+    index("audits_website_idx").on(t.websiteId, t.createdAt),
+    foreignKey({ name: "audits_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade"),
+    foreignKey({ name: "audits_crawl_fk", columns: [t.crawlId, t.organizationId], foreignColumns: [crawls.id, crawls.organizationId] }).onDelete("cascade")
+  ]
+);
+
+export const auditIssues = pgTable(
+  "audit_issues",
+  {
+    id: id(),
+    organizationId: uuid("organization_id").notNull(),
+    auditId: uuid("audit_id").notNull(),
+    rule: text("rule").notNull(),
+    severity: issueSeverity("severity").notNull(),
+    url: text("url"),
+    details: jsonb("details").$type<Record<string, unknown>>(),
+    createdAt
+  },
+  (t) => [
+    index("audit_issues_audit_rule_idx").on(t.auditId, t.rule),
+    foreignKey({ name: "audit_issues_audit_fk", columns: [t.auditId, t.organizationId], foreignColumns: [audits.id, audits.organizationId] }).onDelete("cascade")
+  ]
+);
+
+/** External links found by an audit and the result of checking them (resumable). */
+export const auditExternalLinks = pgTable(
+  "audit_external_links",
+  {
+    id: id(),
+    organizationId: uuid("organization_id").notNull(),
+    auditId: uuid("audit_id").notNull(),
+    url: text("url").notNull(),
+    urlHash: text("url_hash").notNull(),
+    outcome: text("outcome"), // null = pending | ok | broken | unverifiable
+    httpStatus: integer("http_status"),
+    error: text("error"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    createdAt
+  },
+  (t) => [
+    unique("audit_external_links_uq").on(t.auditId, t.urlHash),
+    foreignKey({ name: "audit_external_links_audit_fk", columns: [t.auditId, t.organizationId], foreignColumns: [audits.id, audits.organizationId] }).onDelete("cascade")
+  ]
+);
+
+export const cwvStatus = pgEnum("cwv_status", ["queued", "completed", "failed"]);
+
+/** Core Web Vitals from PageSpeed Insights (lab) and CrUX via PSI (field). */
+export const cwvResults = pgTable(
+  "cwv_results",
+  {
+    id: id(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    websiteId: uuid("website_id").notNull(),
+    url: text("url").notNull(),
+    strategy: text("strategy").notNull(), // mobile | desktop
+    status: cwvStatus("status").notNull().default("queued"),
+    metrics: jsonb("metrics").$type<Record<string, unknown>>(),
+    error: text("error"),
+    createdByUserId: uuid("created_by_user_id"),
+    measuredAt: timestamp("measured_at", { withTimezone: true }),
+    ...timestamps
+  },
+  (t) => [
+    index("cwv_results_website_idx").on(t.websiteId, t.createdAt),
+    foreignKey({ name: "cwv_results_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
+);
+
+export const onpageAnalyses = pgTable(
+  "onpage_analyses",
+  {
+    id: id(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    websiteId: uuid("website_id").notNull(),
+    url: text("url").notNull(),
+    finalUrl: text("final_url"),
+    keyword: text("keyword").notNull(),
+    score: integer("score").notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull(),
+    createdByUserId: uuid("created_by_user_id"),
+    createdAt
+  },
+  (t) => [
+    index("onpage_analyses_website_idx").on(t.websiteId, t.createdAt),
+    foreignKey({ name: "onpage_analyses_website_fk", columns: [t.websiteId, t.organizationId], foreignColumns: [websites.id, websites.organizationId] }).onDelete("cascade")
+  ]
+);
+
+/** Per-workspace third-party credentials, encrypted at rest (AES-256-GCM). */
+export const integrations = pgTable(
+  "integrations",
+  {
+    id: id(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(), // psi | google | …
+    status: text("status").notNull().default("active"),
+    credentialsEnc: text("credentials_enc"),
+    /** Last characters of the key, for display only. */
+    keyHint: text("key_hint"),
+    keyVersion: integer("key_version").notNull().default(1),
+    lastError: text("last_error"),
+    connectedByUserId: uuid("connected_by_user_id"),
+    ...timestamps
+  },
+  (t) => [unique("integrations_org_provider_uq").on(t.organizationId, t.provider)]
+);
+
 export type User = typeof users.$inferSelect;
 export type Organization = typeof organizations.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
@@ -524,3 +680,8 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type Crawl = typeof crawls.$inferSelect;
 export type CrawlPage = typeof crawlPages.$inferSelect;
+export type Audit = typeof audits.$inferSelect;
+export type AuditIssue = typeof auditIssues.$inferSelect;
+export type CwvResult = typeof cwvResults.$inferSelect;
+export type OnpageAnalysis = typeof onpageAnalyses.$inferSelect;
+export type Integration = typeof integrations.$inferSelect;

@@ -22,7 +22,7 @@ export function processJobs(opts: { organizationId?: string; budgetMs?: number }
   return runTick({
     workerDb: workerDb(),
     appDb: db(),
-    handlers: jobHandlers(),
+    handlers: jobHandlers({ psiApiKey: serverEnv().PSI_API_KEY }),
     workerId: `web:${process.pid}:${Math.random().toString(36).slice(2, 8)}`,
     budgetMs: opts.budgetMs ?? BUDGET_MS,
     maxJobMs: Math.min(40_000, (opts.budgetMs ?? BUDGET_MS) - 3_000),

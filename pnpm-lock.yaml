@@ -32,6 +32,9 @@ importers:
       '@sge/jobs':
         specifier: workspace:^
         version: link:../../packages/jobs
+      '@sge/seo-rules':
+        specifier: workspace:^
+        version: link:../../packages/seo-rules
       better-auth:
         specifier: 1.7.25
         version: 1.7.25(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1))(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.65.1)(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15))
@@ -140,6 +143,9 @@ importers:
       '@sge/jobs':
         specifier: workspace:^
         version: link:../jobs
+      '@sge/seo-rules':
+        specifier: workspace:^
+        version: link:../seo-rules
       zod:
         specifier: ^4.1.0
         version: 4.6.7
@@ -246,6 +252,22 @@ importers:
       uuidv7:
         specifier: ^1.0.2
         version: 1.2.1
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
+
+  packages/seo-rules:
+    dependencies:
+      '@sge/crawler':
+        specifier: workspace:^
+        version: link:../crawler
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)

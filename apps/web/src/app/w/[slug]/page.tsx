@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ROLE_LABEL, can, listWebsites } from "@sge/core";
+import { ROLE_LABEL, can, latestAuditScores, listWebsites } from "@sge/core";
+import { scoreTone } from "@/components/audit-ui";
 import { Badge, Card, LinkButton, PageHeader } from "@/components/ui";
 import { db } from "@/lib/db";
 import { currentActor, requireWorkspace } from "@/lib/session";
@@ -9,14 +10,14 @@ export default async function WorkspaceOverview({ params }: PageProps<"/w/[slug]
   const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
   const { workspace: ws, role } = access;
   const isAgency = ws.type === "agency";
-  const sites = await listWebsites(db(), actor, access);
+  const [sites, scores] = await Promise.all([listWebsites(db(), actor, access), latestAuditScores(db(), actor, access)]);
   const verified = sites.filter((s) => s.website.verificationStatus === "verified").length;
 
   const steps = [
     { done: true, label: "Create your workspace" },
     { done: sites.length > 0, label: "Add your first website", href: `/w/${slug}/websites` },
     { done: verified > 0, label: "Verify ownership of a website", href: sites[0] ? `/w/${slug}/websites/${sites[0].website.id}` : `/w/${slug}/websites` },
-    { done: false, label: "Run a technical SEO audit", note: "M4" },
+    { done: scores.size > 0, label: "Run a technical SEO audit", href: sites[0] ? `/w/${slug}/websites/${sites[0].website.id}` : `/w/${slug}/websites` },
     { done: false, label: "Connect Google Search Console", note: "M5" }
   ];
 
@@ -36,6 +37,29 @@ export default async function WorkspaceOverview({ params }: PageProps<"/w/[slug]
           </div>
         }
       />
+      {scores.size > 0 && (
+        <Card className="mb-6">
+          <h2 className="font-semibold">Site health</h2>
+          <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {sites
+              .filter((s) => scores.has(s.website.id))
+              .map((s) => {
+                const sc = scores.get(s.website.id)!;
+                return (
+                  <li key={s.website.id}>
+                    <Link href={`/w/${slug}/websites/${s.website.id}/audits/${sc.auditId}`} className="flex items-center gap-4 rounded-xl border border-border p-3 hover:bg-background">
+                      <span className={`text-2xl font-semibold tabular-nums ${scoreTone(sc.healthScore)}`}>{sc.healthScore ?? "–"}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">{s.website.displayName ?? s.website.domain}</span>
+                        <span className="block text-xs text-muted">{sc.critical} critical issue{sc.critical === 1 ? "" : "s"}</span>
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+          </ul>
+        </Card>
+      )}
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <h2 className="font-semibold">Getting started</h2>

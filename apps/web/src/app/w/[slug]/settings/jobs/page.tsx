@@ -1,10 +1,9 @@
 import { notFound } from "next/navigation";
-import { can, listWorkspaceJobs } from "@sge/core";
+import { can, JOB_LABEL, listWorkspaceJobs } from "@sge/core";
 import { Card, PageHeader } from "@/components/ui";
 import { db } from "@/lib/db";
 import { currentActor, requireWorkspace } from "@/lib/session";
 
-const TYPE_LABEL: Record<string, string> = { "crawl.run": "Website crawl" };
 const fmt = (d: Date | null) => (d ? d.toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "—");
 
 export default async function JobsPage({ params }: PageProps<"/w/[slug]/settings/jobs">) {
@@ -15,7 +14,7 @@ export default async function JobsPage({ params }: PageProps<"/w/[slug]/settings
 
   return (
     <>
-      <PageHeader title="Background jobs" description="The last 100 background tasks in this workspace, such as crawls." />
+      <PageHeader title="Background jobs" description="The last 100 background tasks in this workspace, such as crawls, audits and Core Web Vitals tests." />
       <Card className="p-0">
         {rows.length === 0 ? (
           <p className="p-6 text-sm text-muted">No background jobs yet.</p>
@@ -34,7 +33,7 @@ export default async function JobsPage({ params }: PageProps<"/w/[slug]/settings
               <tbody className="divide-y divide-border">
                 {rows.map((j) => (
                   <tr key={j.id}>
-                    <td className="px-6 py-3">{TYPE_LABEL[j.type] ?? j.type}</td>
+                    <td className="px-6 py-3">{JOB_LABEL[j.type] ?? j.type}</td>
                     <td className="px-6 py-3 capitalize">{j.status}</td>
                     <td className="px-6 py-3 text-muted">{fmt(j.createdAt)}</td>
                     <td className="px-6 py-3 text-muted">{fmt(j.finishedAt)}</td>

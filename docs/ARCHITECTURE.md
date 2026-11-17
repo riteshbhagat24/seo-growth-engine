@@ -70,7 +70,7 @@ packages/
   db/                     Drizzle schema, migrations, RLS policies, tenant client
   core/                   domain services (framework-free), permission checks
   crawler/                safe fetch, robots, sitemap, HTML analysis
-  seo-rules/              audit and on-page rule engine (pure functions)
+  seo-rules/              audit rules (54), health score, comparison, on-page analyser, PSI parsing (pure functions, built M4)
   scoring/                opportunity scoring
   integrations/           google, wordpress, smtp, optional BYO providers
   reports/                report builders + PDF
@@ -164,3 +164,16 @@ OAuth refresh tokens, API keys, SMTP and WordPress passwords are stored encrypte
 **Runtime modes:** a long-running worker (VPS), `worker --once` from cron (cPanel), `GET /api/cron/tick` with `Bearer CRON_SECRET` (Vercel Cron or an external scheduler), and `after()` processing of the requesting workspace's jobs (serverless demo). All modes share one runner; concurrent ticks are safe.
 
 **Consequence.** Under heavy contention a claim round may return fewer jobs than requested (claimers skip each other's locked rows); the next round picks them up. The per-organisation cap can be exceeded by at most one job in a race.
+
+### ADR-002 (M4): audits reuse the crawl tables; rules live in code
+
+**Context.** §6 of the database design proposed separate `audit_pages`/`audit_frontier` tables and a global `audit_rules` table.
+
+**Decision.**
+- **One crawl per audit.** An audit is a row in `audits` tied to exactly one crawl. The crawler stores each page's SEO signals (`crawl_pages.seo`) as it fetches, so no second frontier or page store is needed.
+- **Three phases.** When the crawl finishes it enqueues `audit.analyze`, which checks external links (resumable), then runs the pure rule engine in `@sge/seo-rules` and stores the issues in a single transaction.
+- **Rules in code.** The rule catalogue (codes, severities, explanations, fixes) ships with the code that evaluates it. Rule changes are then reviewed, tested and deployed together, and can't drift from a database copy.
+
+**Consequence.**
+- Raw crawl data and audit results share one retention policy (the newest 10 audits per website).
+- Translating or overriding rule text per platform will need a table later. It can be added then, keyed by rule code.

@@ -24,7 +24,7 @@ async function main() {
   if (!env.WORKER_DATABASE_URL) throw new Error("WORKER_DATABASE_URL is not configured");
   const workerDb = createDb(env.WORKER_DATABASE_URL);
   const appDb = createDb(env.APP_DATABASE_URL);
-  const handlers = jobHandlers();
+  const handlers = jobHandlers({ psiApiKey: env.PSI_API_KEY });
   const tick = () =>
     runTick({
       workerDb,

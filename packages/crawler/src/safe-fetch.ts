@@ -30,7 +30,12 @@ export interface SafeFetchResult {
   status: number;
   contentType: string;
   body: string;
+  /** Each redirect hop's target URL, in order. */
   redirects: string[];
+  /** HTTP status of each redirect hop (301, 302, …), parallel to `redirects`. */
+  redirectStatuses?: number[];
+  /** Selected response headers (lower-case names): x-robots-tag. */
+  headers?: Record<string, string>;
 }
 
 export type SafeFetchErrorCode =
@@ -103,6 +108,7 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
   const resolver = opts.resolver ?? defaultResolver;
   const deadline = Date.now() + timeoutMs;
   const redirects: string[] = [];
+  const redirectStatuses: number[] = [];
 
   let current = rawUrl;
   for (let hop = 0; ; hop++) {
@@ -141,6 +147,7 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
         if (hop >= maxRedirects) throw new SafeFetchError("too_many_redirects", "Too many redirects");
         current = new URL(next, url).toString();
         redirects.push(current);
+        redirectStatuses.push(res.statusCode);
         continue;
       }
 
@@ -165,7 +172,18 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
         }
         chunks.push(chunk as Buffer);
       }
-      return { url: url.toString(), status: res.statusCode, contentType: ct, body: Buffer.concat(chunks).toString("utf8"), redirects };
+      const headers: Record<string, string> = {};
+      const xr = res.headers["x-robots-tag"];
+      if (xr) headers["x-robots-tag"] = (Array.isArray(xr) ? xr.join(", ") : String(xr)).slice(0, 500);
+      return {
+        url: url.toString(),
+        status: res.statusCode,
+        contentType: ct,
+        body: Buffer.concat(chunks).toString("utf8"),
+        redirects,
+        redirectStatuses,
+        headers
+      };
     } catch (e) {
       if (e instanceof SafeFetchError) throw e;
       const name = (e as Error).name;

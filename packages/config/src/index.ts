@@ -53,6 +53,8 @@ const serverSchema = z.object({
     .default("x-forwarded-for")
     .transform((v) => v.split(",").map((h) => h.trim().toLowerCase()).filter(Boolean)),
 
+  /** Optional platform-wide PageSpeed Insights key (workspaces can add their own). */
+  PSI_API_KEY: optional(z.string()),
   GOOGLE_CLIENT_ID: optional(z.string()),
   GOOGLE_CLIENT_SECRET: optional(z.string())
 });

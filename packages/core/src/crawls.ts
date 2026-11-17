@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, schema, sql, withContext, type Db, type Tx } from "@sge/db";
 import type { Crawl, CrawlPage } from "@sge/db/schema";
 import {
-  extractPage,
+  compactSeo,
+  extractSeo,
   looksLikeHtml,
   normalizeCrawlUrl,
   parseRobots,
@@ -19,9 +20,11 @@ import { assertId, inWorkspace, requireAction, type Actor, type WorkspaceAccess 
 import { AppError } from "./errors";
 import { consumeUsage } from "./plans";
 
-const { crawls, crawlPages, websites, jobs } = schema;
+const { crawls, crawlPages, websites, jobs, audits } = schema;
 
 export const CRAWL_JOB = "crawl.run";
+/** Analyses a finished audit crawl (external link checks, rules, score). */
+export const AUDIT_ANALYZE_JOB = "audit.analyze";
 /** Pages per crawl: verified sites get the full cap; unverified sites a small sample. */
 export const CRAWL_MAX_PAGES = { verified: 500, unverified: 25 } as const;
 export const CRAWL_MAX_DEPTH = 10;
@@ -29,60 +32,58 @@ const SITEMAP_LIMIT = { documents: 5, urls: 5_000 };
 
 /* ─────────────────────────────── Service API ────────────────────────────── */
 
+/**
+ * Creates a crawl (frontier seeded with the homepage) and enqueues it. Runs in
+ * the caller's tenant transaction; callers check permissions.
+ */
+export async function createCrawl(tx: Tx, organizationId: string, websiteId: string, userId: string | null): Promise<Crawl> {
+  const [w] = await tx.select().from(websites).where(eq(websites.id, websiteId));
+  if (!w) throw new AppError("not_found", "Website not found");
+  const [active] = await tx
+    .select({ id: crawls.id })
+    .from(crawls)
+    .where(and(eq(crawls.websiteId, w.id), sql`${crawls.status} in ('queued', 'running')`));
+  if (active) throw new AppError("conflict", "A crawl or audit is already running for this website");
+
+  const maxPages = w.verificationStatus === "verified" ? CRAWL_MAX_PAGES.verified : CRAWL_MAX_PAGES.unverified;
+  const startUrl = normalizeCrawlUrl(`${w.url}/`)!;
+  const [crawl] = await tx
+    .insert(crawls)
+    .values({ organizationId, websiteId: w.id, startUrl, maxPages, maxDepth: CRAWL_MAX_DEPTH, createdByUserId: userId })
+    .returning();
+  await tx.insert(crawlPages).values({ organizationId, crawlId: crawl!.id, url: startUrl, urlHash: urlHash(startUrl), depth: 0, source: "start" });
+  const job = await enqueue(tx, {
+    type: CRAWL_JOB,
+    organizationId,
+    websiteId: w.id,
+    payload: { crawlId: crawl!.id },
+    idempotencyKey: `crawl:${crawl!.id}`,
+    maxAttempts: 3,
+    createdByUserId: userId
+  });
+  const [saved] = await tx.update(crawls).set({ jobId: job.id, pagesFound: 1 }).where(eq(crawls.id, crawl!.id)).returning();
+  return saved!;
+}
+
 export async function startCrawl(db: Db, actor: Actor, access: WorkspaceAccess, websiteId: string): Promise<Crawl> {
   assertId(websiteId, "Website");
   return inWorkspace(db, actor, access, async (tx, { role }) => {
     requireAction(role, "work.run");
-    const [w] = await tx.select().from(websites).where(eq(websites.id, websiteId));
-    if (!w) throw new AppError("not_found", "Website not found");
-    const [active] = await tx
-      .select({ id: crawls.id })
-      .from(crawls)
-      .where(and(eq(crawls.websiteId, w.id), sql`${crawls.status} in ('queued', 'running')`));
-    if (active) throw new AppError("conflict", "A crawl is already running for this website");
-
-    const maxPages = w.verificationStatus === "verified" ? CRAWL_MAX_PAGES.verified : CRAWL_MAX_PAGES.unverified;
-    const startUrl = normalizeCrawlUrl(`${w.url}/`)!;
-    const [crawl] = await tx
-      .insert(crawls)
-      .values({
-        organizationId: access.workspace.id,
-        websiteId: w.id,
-        startUrl,
-        maxPages,
-        maxDepth: CRAWL_MAX_DEPTH,
-        createdByUserId: actor.userId
-      })
-      .returning();
-    await tx.insert(crawlPages).values({
-      organizationId: access.workspace.id,
-      crawlId: crawl!.id,
-      url: startUrl,
-      urlHash: urlHash(startUrl),
-      depth: 0,
-      source: "start"
-    });
-    const job = await enqueue(tx, {
-      type: CRAWL_JOB,
-      organizationId: access.workspace.id,
-      websiteId: w.id,
-      payload: { crawlId: crawl!.id },
-      idempotencyKey: `crawl:${crawl!.id}`,
-      maxAttempts: 3,
-      createdByUserId: actor.userId
-    });
-    const [saved] = await tx.update(crawls).set({ jobId: job.id, pagesFound: 1 }).where(eq(crawls.id, crawl!.id)).returning();
+    const saved = await createCrawl(tx, access.workspace.id, websiteId, actor.userId);
+    const crawl = saved;
+    const [w] = await tx.select({ domain: websites.domain }).from(websites).where(eq(websites.id, websiteId));
+    const maxPages = saved.maxPages;
     await audit(tx, {
       organizationId: access.workspace.id,
       actorUserId: actor.userId,
       action: "crawl.started",
       entityType: "crawl",
       entityId: crawl!.id,
-      metadata: { domain: w.domain, maxPages },
+      metadata: { domain: w?.domain, maxPages },
       ip: actor.ip,
       userAgent: actor.userAgent
     });
-    return saved!;
+    return saved;
   });
 }
 
@@ -98,6 +99,7 @@ export async function cancelCrawl(db: Db, actor: Actor, access: WorkspaceAccess,
     if (!c) throw new AppError("conflict", "This crawl isn't running");
     if (c.jobId) await cancelJob(tx, c.jobId);
     await tx.update(crawlPages).set({ status: "skipped", skipReason: "Crawl cancelled" }).where(and(eq(crawlPages.crawlId, c.id), eq(crawlPages.status, "queued")));
+    await tx.update(audits).set({ status: "cancelled", finishedAt: new Date() }).where(and(eq(audits.crawlId, c.id), eq(audits.status, "crawling")));
     await audit(tx, {
       organizationId: access.workspace.id,
       actorUserId: actor.userId,
@@ -191,6 +193,7 @@ export function createCrawlHandler(o: CrawlHandlerOptions = {}): JobHandler {
             .update(crawlPages)
             .set({ status: "skipped", skipReason: error ?? "Crawl stopped" })
             .where(and(eq(crawlPages.crawlId, crawlId), eq(crawlPages.status, "queued")));
+        await onCrawlFinished(tx, org, crawlId, status, error);
       });
 
     let [crawl] = await t((tx) => tx.select().from(crawls).where(eq(crawls.id, crawlId)));
@@ -297,7 +300,8 @@ export function createCrawlHandler(o: CrawlHandlerOptions = {}): JobHandler {
           await tx.update(crawlPages).set({ status: "error", error, durationMs: ms, fetchedAt: new Date() }).where(eq(crawlPages.id, page.id));
         } else {
           const onSite = sameSite(result.url, site.hostname);
-          const parsed = result.status < 300 && onSite ? extractPage(result.body, result.url) : null;
+          const seo = result.status < 300 && onSite ? compactSeo(extractSeo(result.body, result.url, { headers: result.headers })) : null;
+          const parsed = seo ? { title: seo.title, links: seo.internalLinks, nofollow: seo.nofollow } : null;
           await tx
             .update(crawlPages)
             .set({
@@ -308,7 +312,9 @@ export function createCrawlHandler(o: CrawlHandlerOptions = {}): JobHandler {
               bytes: Buffer.byteLength(result.body),
               durationMs: ms,
               title: parsed?.title ?? null,
-              linksOut: parsed?.links.length ?? null,
+              linksOut: seo ? seo.internalLinks.length + seo.externalLinks.length : null,
+              redirects: result.redirects.length ? { urls: result.redirects, statuses: result.redirectStatuses ?? [] } : null,
+              seo: seo as unknown as Record<string, unknown> | null,
               fetchedAt: new Date()
             })
             .where(eq(crawlPages.id, page.id));
@@ -370,7 +376,26 @@ async function readSitemaps(
   return [...pages].slice(0, SITEMAP_LIMIT.urls);
 }
 
-/** Every job type the worker can run. */
-export function jobHandlers(o: CrawlHandlerOptions = {}): Record<string, JobHandler> {
-  return { [CRAWL_JOB]: createCrawlHandler(o) };
+/** If the crawl belongs to an audit, move the audit on: analyse, or stop with the crawl. */
+async function onCrawlFinished(tx: Tx, org: string, crawlId: string, status: Crawl["status"], error: string | null) {
+  const [a] = await tx.select().from(audits).where(and(eq(audits.crawlId, crawlId), eq(audits.status, "crawling")));
+  if (!a) return;
+  if (status === "cancelled" || status === "failed") {
+    await tx
+      .update(audits)
+      .set({ status: status === "cancelled" ? "cancelled" : "failed", error, finishedAt: new Date() })
+      .where(eq(audits.id, a.id));
+    return;
+  }
+  // completed or limit_reached: analyse what was crawled.
+  await tx.update(audits).set({ status: "checking_links" }).where(eq(audits.id, a.id));
+  await enqueue(tx, {
+    type: AUDIT_ANALYZE_JOB,
+    organizationId: org,
+    websiteId: a.websiteId,
+    payload: { auditId: a.id },
+    idempotencyKey: `audit:${a.id}`,
+    maxAttempts: 3,
+    createdByUserId: a.createdByUserId
+  });
 }

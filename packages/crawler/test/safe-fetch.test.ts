@@ -11,7 +11,7 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     seenHosts.push(req.headers.host ?? "");
     const path = req.url ?? "/";
-    if (path === "/ok") return res.writeHead(200, { "content-type": "text/html" }).end("<html><head><meta name='x' content='y'></head></html>");
+    if (path === "/ok") return res.writeHead(200, { "content-type": "text/html", "x-robots-tag": "noindex" }).end("<html><head><meta name='x' content='y'></head></html>");
     if (path === "/to-ok") return res.writeHead(302, { location: "/ok" }).end();
     if (path === "/to-metadata") return res.writeHead(302, { location: "http://169.254.169.254/latest/meta-data/" }).end();
     if (path === "/to-private-host") return res.writeHead(301, { location: "http://internal.test/" }).end();
@@ -91,6 +91,8 @@ describe("safeFetch: against a fixture server", () => {
     const r = await safeFetch(`http://site.test:${port}/to-ok`, fixture);
     expect(r.url).toBe(`http://site.test:${port}/ok`);
     expect(r.redirects).toEqual([`http://site.test:${port}/ok`]);
+    expect(r.redirectStatuses).toEqual([302]);
+    expect(r.headers).toEqual({ "x-robots-tag": "noindex" });
   });
 
   it("re-validates every redirect hop", async () => {

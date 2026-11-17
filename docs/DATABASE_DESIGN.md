@@ -182,3 +182,24 @@ High-volume tables (`audit_pages`, `audit_issues`) are pruned by retention polic
   - RESTRICTIVE policies tie visibility to the website's client scope.
   - Unique `(crawl_id, url_hash)` de-duplicates the frontier.
 - Role `worker_user`: SELECT/INSERT/UPDATE/DELETE on `jobs` and `schedules` only. It can't read organisations, websites or identity tables (tested locally and on Neon).
+
+## 17. As built (M4)
+
+- **`audits`**: one per audit run, created with its crawl (`crawl_id` is unique, composite FK to `crawls`). Lifecycle: `crawling` → `checking_links` → `analyzing` → `completed`, or `failed`/`cancelled`. Stores the health score, severity counts, `summary` (issue count per rule plus stats), the number of external links checked and the trigger (`manual` or `schedule`).
+- **`audit_issues`**: one row per (rule, URL), or per rule for site-wide issues (`url` NULL). Also stores the severity (an enum) and a `details` jsonb with the evidence (link targets, status codes, lengths and so on). Indexed by `(audit_id, rule)`.
+- **`audit_external_links`**: the resumable external link check. Unique `(audit_id, url_hash)`. `outcome` is NULL while pending, then `ok`, `broken` or `unverifiable`.
+- **`crawl_pages` new columns:**
+  - `seo` jsonb: the extracted `PageSeo`, without the full page text;
+  - `redirects` jsonb: `{urls, statuses}`;
+  - `inlinks` and `click_depth`: written by the analysis.
+- **`cwv_results`**: one row per (URL, strategy) measurement: `queued` → `completed` or `failed`. `metrics` jsonb holds the lab metrics, CrUX field data and opportunities.
+- **`onpage_analyses`**: the URL, final URL, keyword, score and the full result (checks, stats, search-result preview, the headings that were read).
+- **`integrations`**: one row per (workspace, provider).
+  - `credentials_enc` holds `v1:` + base64(IV | tag | ciphertext). The AES-256-GCM additional authenticated data is `<org>:<provider>`, so a ciphertext can't be moved between workspaces.
+  - `key_hint` stores the last 4 characters for display.
+- **Isolation**: every new table has FORCE RLS and a `tenant_isolation` policy. RESTRICTIVE policies scoped `TO app_user` hide rows for websites outside a member's client scope: `website_visible` on audits, CWV and on-page; `audit_visible` on issues and external links. `integrations` is tenant-scoped, and permissions are checked in the app (`integrations.manage`).
+- **Plans**: limits gain `psi_runs_month` (Free 20, Pro 200, Agency Free 50, Agency 1000). Migration 0009 lifts FORCE RLS on `plans` only for the duration of that update.
+- **Retention**: the newest 10 finished audits per website are kept. Deleting the old crawls cascades to their pages, audits, issues and link checks.
+- **Deviation from §6**: there is no `audit_rules` table and no `audit_pages` or `audit_frontier`.
+  - The rule catalogue is code (`@sge/seo-rules`), versioned with the rules that use it.
+  - Audits reuse `crawls` and `crawl_pages` as frontier and page store, instead of duplicating them.

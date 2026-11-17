@@ -14,6 +14,20 @@ const { websites, clients } = schema;
 export const VERIFICATION_NAME = "sge-site-verification";
 export type VerificationMethod = NonNullable<Website["verificationMethod"]>;
 export const VERIFICATION_RETRY_SECONDS = 10;
+export const REVERIFY_JOB = "website.reverify";
+export const REVERIFY_INTERVAL_MINUTES = 7 * 24 * 60;
+
+/** Called when a website becomes verified: ownership is re-checked weekly (see maintenance.ts). */
+export async function scheduleReverification(tx: Tx, organizationId: string, websiteId: string): Promise<void> {
+  const next = new Date(Date.now() + REVERIFY_INTERVAL_MINUTES * 60_000);
+  await tx
+    .insert(schema.schedules)
+    .values({ organizationId, websiteId, jobType: REVERIFY_JOB, payload: { websiteId }, intervalMinutes: REVERIFY_INTERVAL_MINUTES, nextRunAt: next })
+    .onConflictDoUpdate({
+      target: [schema.schedules.websiteId, schema.schedules.jobType],
+      set: { enabled: true, nextRunAt: next, updatedAt: new Date() }
+    });
+}
 
 /* ─────────────────────────────── Normalisation ──────────────────────────── */
 
@@ -285,6 +299,7 @@ export async function verifyWebsite(
           : { lastVerificationError: reason }
       )
       .where(eq(websites.id, websiteId));
+    if (reason === null) await scheduleReverification(tx, access.workspace.id, websiteId);
     await audit(tx, {
       organizationId: access.workspace.id,
       actorUserId: actor.userId,

@@ -15,12 +15,13 @@ export const LIMIT_LABEL: Record<LimitKey, string> = {
   pages_crawled_month: "Pages crawled / month",
   keywords: "Tracked keywords",
   backlinks_monitored: "Backlinks monitored",
-  reports_month: "Reports / month"
+  reports_month: "Reports / month",
+  psi_runs_month: "Core Web Vitals tests / month"
 };
 
 /** Limits counted from existing rows; the rest are metered per calendar month. */
 const STOCK: LimitKey[] = ["websites", "clients", "members", "keywords", "backlinks_monitored"];
-export const METERED: LimitKey[] = ["pages_crawled_month", "reports_month"];
+export const METERED: LimitKey[] = ["pages_crawled_month", "reports_month", "psi_runs_month"];
 
 export async function defaultPlanFor(tx: Tx, type: Organization["type"]): Promise<string> {
   const [p] = await tx

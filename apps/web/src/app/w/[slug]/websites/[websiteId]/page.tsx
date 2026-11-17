@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AppError, can, getWebsite, isUuidLike, listClients, listCrawls, verificationInstructions } from "@sge/core";
-import { CrawlStatus } from "@/components/crawl-status";
+import { AppError, can, getAuditSchedule, getWebsite, isUuidLike, listAudits, listClients, listCwv, verificationInstructions } from "@sge/core";
+import { ACTIVE_AUDIT, AuditStatus, scoreTone, Sparkline } from "@/components/audit-ui";
+import { CwvTable } from "@/components/cwv-table";
+import { LiveCrawl } from "@/components/live-crawl";
 import { ActionForm, SubmitButton } from "@/components/form";
-import { Alert, Card, Field, Input, PageHeader, Select } from "@/components/ui";
+import { Alert, Card, Field, Input, LinkButton, PageHeader, Select } from "@/components/ui";
 import { VerificationBadge } from "@/components/verification-badge";
 import { db } from "@/lib/db";
 import { currentActor, requireWorkspace } from "@/lib/session";
 import { deleteWebsiteAction, updateWebsiteAction, verifyWebsiteAction } from "../actions";
-import { startCrawlAction } from "./crawls/actions";
+import { requestCwvAction, setScheduleAction, startAuditAction } from "./audits/actions";
 
-// Starting a crawl processes the first batch right after the response (see lib/jobs).
+// Starting an audit processes the first batch right after the response (see lib/jobs).
 export const maxDuration = 60;
 
 function Code({ children }: { children: string }) {
@@ -33,9 +35,18 @@ export default async function WebsitePage({ params }: PageProps<"/w/[slug]/websi
   const manage = can(access.role, "websites.manage");
   const isAgency = access.workspace.type === "agency";
   const clients = manage && isAgency ? await listClients(db(), actor, access) : [];
-  const crawls = await listCrawls(db(), actor, access, w.id, 5);
-  const crawlActive = crawls.some((c) => c.status === "queued" || c.status === "running");
-  const canCrawl = can(access.role, "work.run");
+  const [auditList, schedule, cwv] = await Promise.all([
+    listAudits(db(), actor, access, w.id, 10),
+    getAuditSchedule(db(), actor, access, w.id),
+    listCwv(db(), actor, access, w.id, 6)
+  ]);
+  const auditActive = auditList.some((a) => ACTIVE_AUDIT.includes(a.status));
+  const canRun = can(access.role, "work.run");
+  const trend = auditList.filter((a) => a.status === "completed" && a.healthScore !== null).map((a) => a.healthScore!).reverse();
+  const latestCompleted = auditList.find((a) => a.status === "completed");
+  const cwvActive = cwv.some((c) => c.status === "queued");
+  const lastCwvUrl = cwv[0]?.url;
+  const latestCwv = lastCwvUrl ? cwv.filter((c) => c.url === lastCwvUrl && c.createdAt.getTime() === cwv[0]!.createdAt.getTime()) : [];
   const ins = verificationInstructions(w);
   const verify = verifyWebsiteAction.bind(null, slug, w.id);
 
@@ -91,6 +102,7 @@ export default async function WebsitePage({ params }: PageProps<"/w/[slug]/websi
 
   return (
     <>
+      <LiveCrawl url={`/api/w/${slug}/websites/${w.id}/cwv`} active={cwvActive} activeStatuses={["queued"]} />
       <Link href={`/w/${slug}/websites`} className="text-sm text-muted hover:text-foreground">
         ← Websites
       </Link>
@@ -144,35 +156,107 @@ export default async function WebsitePage({ params }: PageProps<"/w/[slug]/websi
 
         <Card>
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="font-semibold">Site crawl</h2>
-              <p className="mt-1 text-sm text-muted">
-                Visits your pages like a search engine would, respecting robots.txt.{" "}
-                {w.verificationStatus === "verified" ? "Up to 500 pages per crawl." : "Unverified sites: up to 25 pages."}
-              </p>
+            <div className="flex items-center gap-5">
+              {latestCompleted && (
+                <div className="text-center">
+                  <div className={`text-4xl font-semibold tabular-nums ${scoreTone(latestCompleted.healthScore)}`}>{latestCompleted.healthScore ?? "–"}</div>
+                  <div className="text-xs text-muted">Health</div>
+                </div>
+              )}
+              <div>
+                <h2 className="font-semibold">Technical SEO audit</h2>
+                <p className="mt-1 max-w-xl text-sm text-muted">
+                  Crawls the site like a search engine (respecting robots.txt) and checks 54 issues: broken pages and links, redirects, titles, meta
+                  descriptions, headings, canonicals, indexability, duplicates, images, sitemaps, HTTPS and more.{" "}
+                  {w.verificationStatus === "verified" ? "Up to 500 pages per audit." : "Unverified sites: up to 25 pages."}
+                </p>
+                {trend.length > 1 && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-muted">
+                    <Sparkline values={trend} label="Health score trend" /> last {trend.length} audits
+                  </div>
+                )}
+              </div>
             </div>
-            {canCrawl && !crawlActive && (
-              <ActionForm action={startCrawlAction.bind(null, slug, w.id)}>
-                <SubmitButton pending="Starting…">{crawls.length ? "Crawl again" : "Start crawl"}</SubmitButton>
+            {canRun && !auditActive && (
+              <ActionForm action={startAuditAction.bind(null, slug, w.id)}>
+                <SubmitButton pending="Starting…">{auditList.length ? "Run new audit" : "Run first audit"}</SubmitButton>
               </ActionForm>
             )}
           </div>
-          {crawls.length > 0 && (
+          {auditList.length > 0 && (
             <ul className="mt-4 divide-y divide-border border-t border-border text-sm">
-              {crawls.map((c) => (
-                <li key={c.id} className="flex items-center justify-between gap-3 py-2.5">
-                  <Link href={`/w/${slug}/websites/${w.id}/crawls/${c.id}`} className="text-brand hover:underline">
-                    {c.createdAt.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}
+              {auditList.slice(0, 6).map((a) => (
+                <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                  <Link href={`/w/${slug}/websites/${w.id}/audits/${a.id}`} className="text-brand hover:underline">
+                    {a.createdAt.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}
+                    {a.trigger === "schedule" && <span className="ml-2 text-xs text-muted">scheduled</span>}
                   </Link>
-                  <span className="flex items-center gap-3 text-muted">
-                    {c.pagesFetched} pages
-                    <CrawlStatus status={c.status} />
+                  <span className="flex items-center gap-4 text-muted">
+                    {a.status === "completed" && (
+                      <>
+                        <span className={`font-semibold tabular-nums ${scoreTone(a.healthScore)}`}>{a.healthScore}</span>
+                        <span className="hidden text-xs sm:inline">
+                          <span className="text-danger">{a.critical} critical</span> · <span className="text-warning">{a.warning} warnings</span> · {a.pagesAnalyzed} pages
+                        </span>
+                      </>
+                    )}
+                    <AuditStatus status={a.status} />
                   </span>
                 </li>
               ))}
             </ul>
           )}
+          {manage && (
+            <ActionForm action={setScheduleAction.bind(null, slug, w.id)} className="mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4">
+              <Field label="Automatic audits" htmlFor="frequency">
+                <Select id="frequency" name="frequency" defaultValue={schedule.frequency}>
+                  <option value="off">Off</option>
+                  <option value="weekly">Every week</option>
+                  <option value="monthly">Every month</option>
+                </Select>
+              </Field>
+              <SubmitButton variant="secondary" pending="Saving…">
+                Save schedule
+              </SubmitButton>
+              {schedule.nextRunAt && (
+                <span className="pb-2.5 text-xs text-muted">Next: {schedule.nextRunAt.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}</span>
+              )}
+            </ActionForm>
+          )}
         </Card>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card>
+            <h2 className="font-semibold">Core Web Vitals</h2>
+            <p className="mt-1 text-sm text-muted">Speed and stability from Google PageSpeed Insights (lab test) and real-user data from the Chrome UX Report, when Google has enough traffic for the page.</p>
+            {canRun && (
+              <ActionForm action={requestCwvAction.bind(null, slug, w.id)} className="mt-4 flex flex-wrap items-end gap-3">
+                <Field label="Page" htmlFor="cwv-page">
+                  <Input id="cwv-page" name="page" defaultValue={lastCwvUrl ? new URL(lastCwvUrl).pathname : "/"} maxLength={2000} />
+                </Field>
+                {cwvActive ? (
+                  <span className="pb-2.5 text-sm text-muted">Measuring…</span>
+                ) : (
+                  <SubmitButton variant="secondary" pending="Queuing…">
+                    Measure
+                  </SubmitButton>
+                )}
+              </ActionForm>
+            )}
+            {latestCwv.length > 0 && <CwvTable rows={latestCwv} />}
+          </Card>
+
+          <Card>
+            <h2 className="font-semibold">On-page analysis</h2>
+            <p className="mt-1 text-sm text-muted">
+              Check how well a page targets its keyword: title, meta description, headings, keyword placement and density, content length, readability,
+              internal links, images and schema, with a search-result preview.
+            </p>
+            <LinkButton href={`/w/${slug}/websites/${w.id}/onpage`} variant="secondary" className="mt-4">
+              Analyse a page
+            </LinkButton>
+          </Card>
+        </div>
 
         {manage && (
           <Card>
