@@ -24,7 +24,7 @@ const serverSchema = z.object({
   PRODUCT_NAME: z.string().min(1).default("Futuready Media"),
   /** Signs sessions and tokens. ≥ 32 chars. */
   BETTER_AUTH_SECRET: optional(z.string().min(32)),
-  /** 32-byte key, base64. Required in production (credential encryption). */
+  /** 32-byte key as 64 hex chars (or base64). Required in production (credential encryption). */
   ENCRYPTION_KEY: optional(z.string()),
   CRON_SECRET: optional(z.string().min(16)),
 
