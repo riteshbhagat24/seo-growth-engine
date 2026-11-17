@@ -79,6 +79,12 @@ export async function setTenant(tx: Tx, organizationId: string): Promise<void> {
   await tx.execute(sql`select set_config('app.org_id', ${organizationId}, true)`);
 }
 
+/** Narrow the client scope inside an open transaction (after reading the member's assignments). */
+export async function setClientScope(tx: Tx, scope: "*" | string[]): Promise<void> {
+  if (scope !== "*" && !scope.every((s) => UUID_RE.test(s))) throw new Error("setClientScope: invalid scope");
+  await tx.execute(sql`select set_config('app.client_scope', ${scope === "*" ? "*" : scope.join(",")}, true)`);
+}
+
 /** Tenant-scoped transaction. Equivalent to withContext with a required organizationId. */
 export async function withTenant<T>(db: Db, ctx: TenantContext, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return withContext(db, ctx, fn).catch((err: unknown) => {

@@ -3,6 +3,8 @@ import {
   assignableRoles,
   can,
   canManageMember,
+  listClientAssignments,
+  listClients,
   listMembers,
   listPendingInvitations,
   ROLE_LABEL
@@ -16,6 +18,7 @@ import {
   inviteAction,
   leaveWorkspaceAction,
   removeMemberAction,
+  setClientAccessAction,
   revokeInvitationAction,
   transferOwnershipAction
 } from "../../actions";
@@ -30,11 +33,15 @@ export default async function MembersPage({ params }: PageProps<"/w/[slug]/setti
   const isAgency = ws.type === "agency";
   const manage = isAgency && can(role, "members.manage");
 
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, clients, assignments] = await Promise.all([
     listMembers(db(), actor, access),
-    manage ? listPendingInvitations(db(), actor, access) : Promise.resolve([])
+    manage ? listPendingInvitations(db(), actor, access) : Promise.resolve([]),
+    isAgency ? listClients(db(), actor, access) : Promise.resolve([]),
+    isAgency ? listClientAssignments(db(), actor, access) : Promise.resolve(new Map<string, string[]>())
   ]);
-  const grantable = assignableRoles(role).filter((r) => r !== "client");
+  const clientName = new Map(clients.map((c) => [c.id, c.name]));
+  const grantable = assignableRoles(role).filter((r) => r !== "client" || clients.length > 0);
+  const canEditAccess = manage && access.allClients;
   const others = members.filter((m) => m.membershipId !== access.membershipId && m.role !== "client");
 
   return (
@@ -47,7 +54,7 @@ export default async function MembersPage({ params }: PageProps<"/w/[slug]/setti
         {manage && (
           <Card>
             <h2 className="mb-4 font-semibold">Invite someone</h2>
-            <ActionForm action={inviteAction.bind(null, slug)} className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <ActionForm action={inviteAction.bind(null, slug)} className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
               <div className="flex-1">
                 <Field label="Email" htmlFor="invite-email">
                   <Input id="invite-email" name="email" type="email" required placeholder="name@company.com" />
@@ -63,6 +70,19 @@ export default async function MembersPage({ params }: PageProps<"/w/[slug]/setti
                 </Select>
               </Field>
               <SubmitButton pending="Sending…">Send invitation</SubmitButton>
+              {clients.length > 0 && (
+                <fieldset className="sm:basis-full">
+                  <legend className="text-sm font-medium">Limit to clients (optional; required for the Client role)</legend>
+                  <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+                    {clients.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="clientIds" value={c.id} className="size-4 accent-[var(--brand)]" />
+                        {c.name}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
             </ActionForm>
             <p className="mt-3 text-xs text-muted">Invitations expire after 7 days. They must be accepted with the same email address.</p>
           </Card>
@@ -75,6 +95,7 @@ export default async function MembersPage({ params }: PageProps<"/w/[slug]/setti
                 <tr>
                   <th className="px-6 py-3 font-medium">Member</th>
                   <th className="px-6 py-3 font-medium">Role</th>
+                  {isAgency && <th className="px-6 py-3 font-medium">Client access</th>}
                   <th className="px-6 py-3 font-medium">Joined</th>
                   <th className="px-6 py-3" />
                 </tr>
@@ -110,6 +131,19 @@ export default async function MembersPage({ params }: PageProps<"/w/[slug]/setti
                           <Badge>{ROLE_LABEL[m.role]}</Badge>
                         )}
                       </td>
+                      {isAgency && (
+                        <td className="px-6 py-3">
+                          <ClientAccessCell
+                            slug={slug}
+                            membershipId={m.membershipId}
+                            role={m.role}
+                            assigned={assignments.get(m.membershipId) ?? []}
+                            clients={clients}
+                            clientName={clientName}
+                            editable={canEditAccess && !self && canManageMember(role, m.role)}
+                          />
+                        </td>
+                      )}
                       <td className="px-6 py-3 text-muted">{fmt(m.joinedAt)}</td>
                       <td className="px-6 py-3 text-right">
                         {editable && (
@@ -187,5 +221,52 @@ export default async function MembersPage({ params }: PageProps<"/w/[slug]/setti
         )}
       </div>
     </>
+  );
+}
+
+function ClientAccessCell(props: {
+  slug: string;
+  membershipId: string;
+  role: string;
+  assigned: string[];
+  clients: { id: string; name: string }[];
+  clientName: Map<string, string>;
+  editable: boolean;
+}) {
+  const restricted = props.role === "client" || props.assigned.length > 0;
+  const summary = restricted
+    ? props.assigned.map((id) => props.clientName.get(id) ?? "Archived client").join(", ") || "No clients"
+    : "All clients";
+  if (!props.editable || props.clients.length === 0) return <span className="text-muted">{summary}</span>;
+  return (
+    <details>
+      <summary className="cursor-pointer text-muted hover:text-foreground">{summary}</summary>
+      <ActionForm action={setClientAccessAction.bind(null, props.slug)} className="mt-3 flex flex-col gap-2">
+        <input type="hidden" name="membershipId" value={props.membershipId} />
+        {props.role !== "client" && (
+          <>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="scope" value="all" defaultChecked={!restricted} /> All clients
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="scope" value="some" defaultChecked={restricted} /> Only these:
+            </label>
+          </>
+        )}
+        {props.role === "client" && <input type="hidden" name="scope" value="some" />}
+        <div className="flex flex-col gap-1 pl-6">
+          {props.clients.map((c) => (
+            <label key={c.id} className="flex items-center gap-2">
+              <input type="checkbox" name="clientIds" value={c.id} defaultChecked={props.assigned.includes(c.id)} /> {c.name}
+            </label>
+          ))}
+        </div>
+        <div>
+          <SubmitButton variant="secondary" className="h-8 px-3">
+            Save access
+          </SubmitButton>
+        </div>
+      </ActionForm>
+    </details>
   );
 }

@@ -29,6 +29,20 @@
       "when": 1794832184455,
       "tag": "0003_identity_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794899100359,
+      "tag": "0004_plans_clients_websites",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794899120759,
+      "tag": "0005_m2_rls_and_plans",
+      "breakpoints": true
     }
   ]
 }

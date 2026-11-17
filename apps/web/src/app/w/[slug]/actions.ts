@@ -8,6 +8,7 @@ import {
   inviteMember,
   leaveWorkspace,
   removeMember,
+  setMemberClientAccess,
   revokeInvitation,
   ROLES,
   transferOwnership,
@@ -52,7 +53,8 @@ export async function updateBrandingAction(slug: string, _: ActionResult, data: 
 export async function inviteAction(slug: string, _: ActionResult, data: FormData): Promise<ActionResult> {
   return runAction(async () => {
     const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
-    const invite = await inviteMember(db(), actor, access, { email: field(data, "email"), role: parseRole(field(data, "role")) });
+    const clientIds = data.getAll("clientIds").filter((v): v is string => typeof v === "string" && v !== "");
+    const invite = await inviteMember(db(), actor, access, { email: field(data, "email"), role: parseRole(field(data, "role")), clientIds });
     const url = `${serverEnv().APP_URL}/invite/${invite.token}`;
     revalidatePath(`/w/${slug}/settings/members`);
     try {
@@ -114,5 +116,18 @@ export async function leaveWorkspaceAction(slug: string, _: ActionResult): Promi
     const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
     await leaveWorkspace(db(), actor, access);
     redirect("/app");
+  });
+}
+
+export async function setClientAccessAction(slug: string, _: ActionResult, data: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
+    const clientIds = data.getAll("clientIds").filter((v): v is string => typeof v === "string" && v !== "");
+    await setMemberClientAccess(db(), actor, access, field(data, "membershipId"), {
+      allClients: field(data, "scope") === "all",
+      clientIds
+    });
+    revalidatePath(`/w/${slug}/settings/members`);
+    return { ok: "Client access updated." };
   });
 }

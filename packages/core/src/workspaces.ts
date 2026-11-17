@@ -1,34 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
-import { and, eq, sql, schema, setTenant, withContext, type Db, type Tx } from "@sge/db";
+import { and, eq, inArray, sql, schema, setTenant, withContext, type Db, type Tx } from "@sge/db";
 import type { Organization, OrgBranding } from "@sge/db/schema";
 import { audit, listAuditLogs } from "./audit";
 import { AppError, isUniqueViolation } from "./errors";
-import { can, canAssignRole, canManageMember, type Action, type Role } from "./permissions";
+import { canAssignRole, canManageMember, type Role } from "./permissions";
+import { assertId, assertIds, inWorkspace, requireAction, toRef, type Actor, type WorkspaceAccess, type WorkspaceRef } from "./context";
+import { assertWithinLimit, defaultPlanFor } from "./plans";
 import { hashToken, isWellFormedToken, newToken } from "./tokens";
 
 const { organizations, memberships, invitations } = schema;
-
-export interface Actor {
-  userId: string;
-  ip?: string | null;
-  userAgent?: string | null;
-}
-
-export interface WorkspaceRef {
-  id: string;
-  slug: string;
-  name: string;
-  type: Organization["type"];
-  branding: OrgBranding;
-}
-
-export interface WorkspaceAccess {
-  workspace: WorkspaceRef;
-  membershipId: string;
-  role: Role;
-}
 
 export const INVITATION_TTL_DAYS = 7;
 
@@ -74,41 +56,6 @@ async function identity(tx: Tx): Promise<{ email: string; emailVerified: boolean
   return row ? { email: row.email, emailVerified: row.email_verified, name: row.name } : null;
 }
 
-/** The actor's role as of this transaction (defeats stale-role races). */
-async function freshRole(tx: Tx, organizationId: string, userId: string): Promise<{ role: Role; membershipId: string }> {
-  const [m] = await tx
-    .select({ role: memberships.role, id: memberships.id })
-    .from(memberships)
-    .where(and(eq(memberships.organizationId, organizationId), eq(memberships.userId, userId)));
-  if (!m) throw new AppError("not_found", "Workspace not found");
-  return { role: m.role, membershipId: m.id };
-}
-
-function requireAction(role: Role, action: Action): void {
-  if (!can(role, action)) throw new AppError("forbidden", "You don't have permission to do that");
-}
-
-/** Runs `fn` as `actor` inside `access.workspace`, with the actor's current role. */
-async function inWorkspace<T>(
-  db: Db,
-  actor: Actor,
-  access: WorkspaceAccess,
-  fn: (tx: Tx, role: Role, membershipId: string) => Promise<T>
-): Promise<T> {
-  return withContext(db, { userId: actor.userId, organizationId: access.workspace.id }, async (tx) => {
-    const { role, membershipId } = await freshRole(tx, access.workspace.id, actor.userId);
-    return fn(tx, role, membershipId);
-  });
-}
-
-const toRef = (o: Organization): WorkspaceRef => ({
-  id: o.id,
-  slug: o.slug,
-  name: o.name,
-  type: o.type,
-  branding: o.branding
-});
-
 /* ─────────────────────────────── Workspaces ─────────────────────────────── */
 
 async function createWorkspace(
@@ -132,6 +79,7 @@ async function createWorkspace(
           })
           .returning();
         await tx.insert(memberships).values({ organizationId: id, userId: actor.userId, role: "owner" });
+        await tx.insert(schema.subscriptions).values({ organizationId: id, planId: await defaultPlanFor(tx, input.type) });
         await audit(tx, {
           organizationId: id,
           actorUserId: actor.userId,
@@ -197,26 +145,13 @@ export async function listMyWorkspaces(db: Db, userId: string): Promise<MyWorksp
     .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "personal" ? -1 : 1));
 }
 
-/** Membership check for a request. null => render 404 (never reveal existence). */
-export async function resolveWorkspace(db: Db, userId: string, slug: string): Promise<WorkspaceAccess | null> {
-  if (!/^[a-z0-9-]{1,60}$/.test(slug)) return null;
-  const [row] = await withContext(db, { userId }, (tx) =>
-    tx
-      .select({ org: organizations, role: memberships.role, membershipId: memberships.id })
-      .from(organizations)
-      .innerJoin(memberships, and(eq(memberships.organizationId, organizations.id), eq(memberships.userId, userId)))
-      .where(and(eq(organizations.slug, slug), eq(organizations.status, "active")))
-  );
-  return row ? { workspace: toRef(row.org), role: row.role, membershipId: row.membershipId } : null;
-}
-
 export async function updateWorkspace(
   db: Db,
   actor: Actor,
   access: WorkspaceAccess,
   input: { name?: string; branding?: unknown }
 ): Promise<WorkspaceRef> {
-  return inWorkspace(db, actor, access, async (tx, role) => {
+  return inWorkspace(db, actor, access, async (tx, { role }) => {
     const patch: Partial<typeof organizations.$inferInsert> = {};
     if (input.name !== undefined) {
       requireAction(role, "workspace.update");
@@ -280,13 +215,14 @@ async function memberProfiles(tx: Tx): Promise<MemberProfile[]> {
 }
 
 export async function listMembers(db: Db, actor: Actor, access: WorkspaceAccess): Promise<MemberProfile[]> {
-  return inWorkspace(db, actor, access, async (tx, role) => {
+  return inWorkspace(db, actor, access, async (tx, { role }) => {
     requireAction(role, "members.view");
     return memberProfiles(tx);
   });
 }
 
 async function targetMembership(tx: Tx, organizationId: string, membershipId: string) {
+  assertId(membershipId, "Member");
   const [m] = await tx
     .select()
     .from(memberships)
@@ -302,7 +238,7 @@ export async function changeMemberRole(
   membershipId: string,
   newRole: Role
 ): Promise<void> {
-  await inWorkspace(db, actor, access, async (tx, role, ownId) => {
+  await inWorkspace(db, actor, access, async (tx, { role, membershipId: ownId }) => {
     if (membershipId === ownId) throw new AppError("forbidden", "You can't change your own role");
     const target = await targetMembership(tx, access.workspace.id, membershipId);
     if (!canManageMember(role, target.role) || !canAssignRole(role, newRole))
@@ -323,7 +259,7 @@ export async function changeMemberRole(
 }
 
 export async function removeMember(db: Db, actor: Actor, access: WorkspaceAccess, membershipId: string): Promise<void> {
-  await inWorkspace(db, actor, access, async (tx, role, ownId) => {
+  await inWorkspace(db, actor, access, async (tx, { role, membershipId: ownId }) => {
     if (membershipId === ownId) throw new AppError("invalid_input", "Use “Leave workspace” to remove yourself");
     const target = await targetMembership(tx, access.workspace.id, membershipId);
     if (!canManageMember(role, target.role)) throw new AppError("forbidden", "You don't have permission to do that");
@@ -342,7 +278,7 @@ export async function removeMember(db: Db, actor: Actor, access: WorkspaceAccess
 }
 
 export async function leaveWorkspace(db: Db, actor: Actor, access: WorkspaceAccess): Promise<void> {
-  await inWorkspace(db, actor, access, async (tx, role, ownId) => {
+  await inWorkspace(db, actor, access, async (tx, { role, membershipId: ownId }) => {
     if (access.workspace.type === "personal") throw new AppError("forbidden", "You can't leave your personal workspace");
     if (role === "owner") throw new AppError("last_owner", "Transfer ownership to another member before leaving");
     await audit(tx, {
@@ -364,7 +300,7 @@ export async function transferOwnership(
   access: WorkspaceAccess,
   toMembershipId: string
 ): Promise<void> {
-  await inWorkspace(db, actor, access, async (tx, role, ownId) => {
+  await inWorkspace(db, actor, access, async (tx, { role, membershipId: ownId }) => {
     requireAction(role, "workspace.transfer");
     if (access.workspace.type === "personal") throw new AppError("forbidden", "Personal workspaces can't be transferred");
     if (toMembershipId === ownId) throw new AppError("invalid_input", "You already own this workspace");
@@ -392,18 +328,30 @@ export async function inviteMember(
   db: Db,
   actor: Actor,
   access: WorkspaceAccess,
-  input: { email: string; role: Role }
+  input: { email: string; role: Role; clientIds?: string[] }
 ): Promise<{ token: string; invitationId: string; email: string; expiresAt: Date }> {
   const email = parse(emailSchema, input.email);
-  return inWorkspace(db, actor, access, async (tx, role) => {
+  const clientIds = [...new Set(input.clientIds ?? [])];
+  assertIds(clientIds, "Client");
+  return inWorkspace(db, actor, access, async (tx, { role, allClients }) => {
     requireAction(role, "members.manage");
     if (access.workspace.type === "personal")
       throw new AppError("forbidden", "Personal workspaces don't have teams. Create an agency workspace to invite people.");
-    if (input.role === "client") throw new AppError("invalid_input", "Client access is set up from client management");
+    if (!allClients) throw new AppError("forbidden", "Members limited to specific clients can't invite people");
     if (!canAssignRole(role, input.role)) throw new AppError("forbidden", "You can't grant that role");
+    if (input.role === "client" && clientIds.length === 0)
+      throw new AppError("invalid_input", "Choose which client(s) this person can see");
+    if (clientIds.length > 0) {
+      const found = await tx
+        .select({ id: schema.clients.id })
+        .from(schema.clients)
+        .where(and(inArray(schema.clients.id, clientIds), eq(schema.clients.status, "active")));
+      if (found.length !== clientIds.length) throw new AppError("invalid_input", "One of the selected clients doesn't exist");
+    }
     const members = await memberProfiles(tx);
     if (members.some((m) => m.email.toLowerCase() === email))
       throw new AppError("conflict", "That person is already a member");
+    await assertWithinLimit(tx, access.workspace.id, "members");
 
     const token = newToken();
     const expiresAt = new Date(Date.now() + INVITATION_TTL_DAYS * 86_400_000);
@@ -416,6 +364,7 @@ export async function inviteMember(
           role: input.role,
           tokenHash: hashToken(token),
           invitedByUserId: actor.userId,
+          clientIds,
           expiresAt
         })
         .returning({ id: invitations.id });
@@ -439,7 +388,7 @@ export async function inviteMember(
 }
 
 export async function listPendingInvitations(db: Db, actor: Actor, access: WorkspaceAccess) {
-  return inWorkspace(db, actor, access, async (tx, role) => {
+  return inWorkspace(db, actor, access, async (tx, { role }) => {
     requireAction(role, "members.manage");
     return tx
       .select({
@@ -461,7 +410,8 @@ export async function revokeInvitation(
   access: WorkspaceAccess,
   invitationId: string
 ): Promise<void> {
-  await inWorkspace(db, actor, access, async (tx, role) => {
+  assertId(invitationId, "Invitation");
+  await inWorkspace(db, actor, access, async (tx, { role }) => {
     requireAction(role, "members.manage");
     const [inv] = await tx
       .update(invitations)
@@ -539,10 +489,27 @@ export async function acceptInvitation(db: Db, actor: Actor, token: string): Pro
     if (who.email.toLowerCase() !== inv.email.toLowerCase())
       throw new AppError("email_mismatch", `This invitation was sent to ${inv.email}. Sign in with that address to accept it.`);
 
-    await tx
+    const [joined] = await tx
       .insert(memberships)
-      .values({ organizationId: inv.organizationId, userId: actor.userId, role: inv.role })
-      .onConflictDoNothing({ target: [memberships.organizationId, memberships.userId] });
+      .values({
+        organizationId: inv.organizationId,
+        userId: actor.userId,
+        role: inv.role,
+        allClients: inv.role !== "client" && inv.clientIds.length === 0
+      })
+      .onConflictDoNothing({ target: [memberships.organizationId, memberships.userId] })
+      .returning({ id: memberships.id });
+    if (joined && inv.clientIds.length > 0) {
+      // Only clients that still exist; archived ones are skipped.
+      const live = await tx
+        .select({ id: schema.clients.id })
+        .from(schema.clients)
+        .where(and(inArray(schema.clients.id, inv.clientIds), eq(schema.clients.status, "active")));
+      if (live.length > 0)
+        await tx
+          .insert(schema.membershipClients)
+          .values(live.map((c) => ({ organizationId: inv.organizationId, membershipId: joined.id, clientId: c.id })));
+    }
     await tx
       .update(invitations)
       .set({ status: "accepted", acceptedByUserId: actor.userId, acceptedAt: new Date() })
@@ -565,7 +532,7 @@ export async function acceptInvitation(db: Db, actor: Actor, token: string): Pro
 /* ───────────────────────────────── Audit ────────────────────────────────── */
 
 export async function listWorkspaceAudit(db: Db, actor: Actor, access: WorkspaceAccess, limit = 100) {
-  return inWorkspace(db, actor, access, async (tx, role) => {
+  return inWorkspace(db, actor, access, async (tx, { role }) => {
     requireAction(role, "audit.view");
     return listAuditLogs(tx, access.workspace.id, limit);
   });

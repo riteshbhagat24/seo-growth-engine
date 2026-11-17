@@ -1,15 +1,21 @@
-import { ROLE_LABEL, can } from "@sge/core";
+import Link from "next/link";
+import { ROLE_LABEL, can, listWebsites } from "@sge/core";
 import { Badge, Card, LinkButton, PageHeader } from "@/components/ui";
-import { requireWorkspace } from "@/lib/session";
+import { db } from "@/lib/db";
+import { currentActor, requireWorkspace } from "@/lib/session";
 
 export default async function WorkspaceOverview({ params }: PageProps<"/w/[slug]">) {
   const { slug } = await params;
-  const { workspace: ws, role } = await requireWorkspace(slug);
+  const [actor, access] = await Promise.all([currentActor(), requireWorkspace(slug)]);
+  const { workspace: ws, role } = access;
   const isAgency = ws.type === "agency";
+  const sites = await listWebsites(db(), actor, access);
+  const verified = sites.filter((s) => s.website.verificationStatus === "verified").length;
 
   const steps = [
     { done: true, label: "Create your workspace" },
-    { done: false, label: "Add your first website and verify ownership", note: "Arrives in the next release (M2)" },
+    { done: sites.length > 0, label: "Add your first website", href: `/w/${slug}/websites` },
+    { done: verified > 0, label: "Verify ownership of a website", href: sites[0] ? `/w/${slug}/websites/${sites[0].website.id}` : `/w/${slug}/websites` },
     { done: false, label: "Run a technical SEO audit", note: "M4" },
     { done: false, label: "Connect Google Search Console", note: "M5" }
   ];
@@ -45,8 +51,14 @@ export default async function WorkspaceOverview({ params }: PageProps<"/w/[slug]
                   {s.done ? "✓" : ""}
                 </span>
                 <span>
-                  <span className={s.done ? "text-muted line-through" : ""}>{s.label}</span>
-                  {s.note && <span className="ml-2 text-xs text-muted">({s.note})</span>}
+                  {"href" in s && s.href && !s.done ? (
+                    <Link href={s.href} className="text-brand hover:underline">
+                      {s.label}
+                    </Link>
+                  ) : (
+                    <span className={s.done ? "text-muted line-through" : ""}>{s.label}</span>
+                  )}
+                  {"note" in s && s.note && <span className="ml-2 text-xs text-muted">({s.note})</span>}
                 </span>
               </li>
             ))}

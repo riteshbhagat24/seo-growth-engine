@@ -7,7 +7,10 @@ export type ErrorCode =
   | "invitation_invalid"
   | "invitation_expired"
   | "email_mismatch"
-  | "last_owner";
+  | "last_owner"
+  | "limit_reached"
+  | "verification_failed"
+  | "rate_limited";
 
 const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
@@ -18,7 +21,10 @@ const STATUS: Record<ErrorCode, number> = {
   invitation_invalid: 404,
   invitation_expired: 410,
   email_mismatch: 403,
-  last_owner: 409
+  last_owner: 409,
+  limit_reached: 403,
+  verification_failed: 422,
+  rate_limited: 429
 };
 
 /** Expected, user-facing failure. Message is safe to show; anything else is a bug. */

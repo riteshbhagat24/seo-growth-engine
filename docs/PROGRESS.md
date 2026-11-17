@@ -106,9 +106,48 @@ Known gaps / remaining work:
 - **Before cPanel production:** confirm which header the host's proxy uses for the client IP and set `TRUSTED_IP_HEADERS` (SECURITY §11).
 - **Account deletion and data export:** scheduled with the privacy features in M11.
 
-## Next: M2 — Plans, usage, clients, websites
+## M2 — Plans, usage, clients, websites ✅ (2026-11-17)
 
-Plan definitions and usage limits (no billing), clients and client assignment, the Client role with its read-only portal scope, and websites with ownership verification (DNS TXT, meta tag, HTML file).
+Implemented:
+- **Plans and usage (no billing):** plan catalogue in the database (Free and Pro for personal, Agency Free and Agency for agencies; limits editable without code), a subscription per workspace with per-workspace overrides, stock limits (websites, clients, members incl. pending invites) and metered monthly limits (pages crawled, reports) with atomic counters, and a "Plan & usage" page for owners and admins.
+- **Clients:** create, edit, archive and restore, with website counts, a client detail page, and its websites and restricted members.
+- **Client-scoped access:** the Client role (read-only, assigned clients only) and optional client restriction for any member, set at invitation time or edited later from the Members page. Enforced by RLS (`app_client_allowed`), re-read every request.
+- **Websites:** add (URL normalisation, rejects IPs, localhost and reserved names), rename, assign to a client, and remove; one domain per workspace.
+- **Ownership verification:** DNS TXT, meta tag or HTML file, with step-by-step instructions, clear failure reasons and a 10-second retry throttle; audited.
+- **`@sge/crawler`:** SSRF-safe fetcher with IP pinning, redirect re-validation and limits; HTML meta parsing.
+- Overview checklist now reflects real progress (website added, ownership verified).
+
+Verified (local, 2026-11-17):
+| Check | Result |
+|---|---|
+| Typecheck (6 packages) and lint | ✅ |
+| `@sge/crawler` (address blocklist incl. IPv6/mapped/NAT64/6to4, SSRF, redirects, limits, pinning) | ✅ 61/61 |
+| `@sge/db` schema invariants + isolation (now 10 tenant tables) | ✅ 12/12 |
+| `@sge/core` (M1 + plans 8, clients/scope 10, websites/verification 25) | ✅ 175/175 |
+| `@sge/worker` | ✅ 2/2 |
+| Playwright e2e (M1 12 + M2 7) against the production bundle | ✅ 19/19 |
+| Neon demo database migrated; app role can read plans but not change them, sees nothing without a tenant | ✅ |
+
+Notable tests:
+- six simultaneous "add website" requests on a 1-website plan → exactly one succeeds;
+- the metered counter stops at exactly the limit under concurrency;
+- a client user's raw SQL session sees only their client's rows;
+- writes can't escape the client scope;
+- widening or narrowing a member's access takes effect on their very next request;
+- verification rejects tokens in HTML comments and redirects to other domains.
+
+Bugs caught by the new tests:
+- **Metered usage SQL compared numbers as text.** "300 ≤ 2000" was false; fixed with explicit casts.
+- **Client scope blocked owner-role SQL without a scope.** This was correct behaviour; the test helper now sets the scope.
+
+Known gaps / remaining work:
+- **Re-verifying ownership periodically** is designed for but needs the job system (M3).
+- **Plan changes** are SQL-only until the platform admin area (M11).
+- **Client-specific dashboards:** client users currently see websites and clients read-only; richer dashboards come as data arrives (audits M4, Search Console M5).
+
+## Next: M3 — Job system & crawler
+
+pg-boss worker with per-workspace fairness, schedules, job history UI, and a resumable, polite crawl frontier on top of `safeFetch` (robots.txt, sitemaps). On cPanel the same worker runs in bounded batches from cron.
 
 ## Seed directory dataset (draft, needs review)
 

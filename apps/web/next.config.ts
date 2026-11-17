@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   // Self-contained server bundle: required for cPanel (Passenger) deployment.
   output: "standalone",
   outputFileTracingRoot: path.join(__dirname, "../../"),
-  transpilePackages: ["@sge/db", "@sge/config", "@sge/core"],
+  transpilePackages: ["@sge/db", "@sge/config", "@sge/core", "@sge/crawler"],
   poweredByHeader: false,
   async headers() {
     return [

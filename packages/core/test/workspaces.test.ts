@@ -19,7 +19,7 @@ import {
   transferOwnership,
   updateWorkspace,
   type WorkspaceAccess
-} from "../src/workspaces";
+} from "../src/index";
 import { AppError } from "../src/errors";
 import { closeAll, db, makeUser, owner, ownerInTenant } from "./helpers";
 
@@ -44,6 +44,8 @@ async function access(userId: string, slug: string): Promise<WorkspaceAccess> {
 async function agency() {
   const o = await makeUser();
   const ws = await createAgencyWorkspace(db, o, "Acme Agency");
+  // Tests exercise team flows, not plan limits (those are in plans.test.ts).
+  await ownerInTenant(ws.id, "UPDATE subscriptions SET plan_id = 'agency' WHERE organization_id = $1", [ws.id]);
   const ownerAccess = await access(o.userId, ws.slug);
   async function addMember(role: "admin" | "manager" | "specialist" | "viewer") {
     const u = await makeUser();

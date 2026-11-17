@@ -159,3 +159,13 @@ High-volume tables (`audit_pages`, `audit_issues`) are pruned by retention polic
 - `invitations`: `token_hash` unique; partial unique index on (organization_id, lower(email)) while `pending`.
 - Policies beyond the standard `tenant_isolation`: `membership_self_read` (a user can list their own memberships across workspaces), `org_select` (current tenant, member, or invitation-token holder), `invite_by_token`, `platform_settings.read_all`.
 - FORCE RLS applies to the table owner too, so seed rows are inserted before RLS is enabled, and SECURITY DEFINER functions still respect tenant policies on public tables.
+
+## 15. As built (M2)
+
+- `plans` (global, read-only to the app; limit `-1` = unlimited). Seeded: `free` and `pro` (personal), `agency_free` and `agency` (agency). Defaults per workspace type via `is_default`.
+- `subscriptions` (one per workspace, created with it; existing workspaces backfilled). `app_user` may INSERT but not UPDATE/DELETE: plan changes are a platform-admin action. `overrides` jsonb adjusts individual limits.
+- `usage_counters` (organization_id, metric, period_start = calendar month): atomic, capped increments for metered limits.
+- `clients` with composite FKs from `membership_clients` and `websites` (`(client_id, organization_id)` → `clients(id, organization_id)`), so a website or assignment can never reference another workspace's client.
+- `membership_clients` + `memberships.all_clients`: per-member client restriction. The `client` role is always restricted.
+- `websites`: `client_id`, verification status/method/token/timestamps/last error.
+- **Client scope in RLS:** `app_client_allowed(client_id)` reads `app.client_scope` (`*` or a list of ids). RESTRICTIVE policies on `clients` and `websites` apply it on top of tenant isolation. Workspace-level rows (`client_id` NULL) are visible only with `*`. Every request sets the scope from the member's assignments, re-read inside the same transaction.

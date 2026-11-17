@@ -109,3 +109,20 @@ Data export per workspace (JSON/CSV), workspace deletion (soft delete for 30 day
 - **Client IP trust:** rate limiting and audit IPs come from `TRUSTED_IP_HEADERS` (default `x-forwarded-for`). This is only safe if the hosting proxy overwrites that header. Vercel does. **Before going live on cPanel, confirm what the host's proxy sets**, and change the variable if needed; otherwise clients can spoof their IP and bypass per-IP limits.
 - **Not yet built (scheduled):** TOTP two-factor authentication and breached-password checks on password change are planned for M11 hardening.
 - **Demo mail mode (`MAIL_TRANSPORT=log`):** emails are not sent; verification, reset, sign-in and invitation links are written to the server log, and `/api/health` reports `mail: "log"`. Anyone who can read the logs can use those links, so this is for demos only and must be replaced with SMTP before real users sign up. It must be set explicitly; with neither SMTP nor this flag, production refuses to start.
+
+## 12. Implementation notes (M2)
+
+- **Outbound requests to user-supplied URLs** go through `@sge/crawler`'s `safeFetch`:
+  - **Allowed targets:** http/https only, ports 80 and 443, no credentials in URLs.
+  - **Address checks:** every DNS answer must be public, so a mixed public/private answer is rejected. Blocked ranges include private, loopback, link-local and cloud metadata, CGNAT, multicast and documentation/benchmark ranges, plus IPv6 equivalents and IPv4 embedded through mapped, NAT64 or 6to4 addresses.
+  - **Connection pinning:** the TCP connection is pinned to the vetted IP, which defeats DNS rebinding.
+  - **Redirects:** each hop is re-validated, up to 5.
+  - **Limits:** 10 s, 1–2 MB, HTML/text only.
+  - **Test coverage:** 61 tests, including hex/decimal IP encodings and redirect-to-metadata.
+- **Ownership verification** is a network check performed outside any database transaction:
+  - **Throttling:** one attempt per website every 10 s, claimed atomically.
+  - **Redirects:** a meta tag or file check fails if the site redirects to another domain.
+  - **Audit:** results are audited.
+- **Client-scoped access** is enforced by RLS, not only by the UI. A client user can't see other clients or agency-level websites even through raw SQL in their own scope (tested). Members restricted to clients cannot manage clients, invite people or change access.
+- **Plan limits** are checked under a per-workspace advisory lock, so concurrent requests can't exceed them (tested with 6 simultaneous requests). They count the whole workspace, regardless of the actor's client scope.
+- **Malformed ids** from URLs and forms are rejected as "not found" before reaching SQL.
