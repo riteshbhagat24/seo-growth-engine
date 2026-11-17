@@ -16,6 +16,7 @@
   "dependencies": {
     "@sge/crawler": "workspace:^",
     "@sge/db": "workspace:*",
+    "@sge/jobs": "workspace:^",
     "zod": "^4.1.0"
   },
   "devDependencies": {

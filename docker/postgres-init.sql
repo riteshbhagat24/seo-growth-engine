@@ -8,3 +8,6 @@ CREATE DATABASE sge_test OWNER app_owner;
 -- Identity tables (schema "auth") are reachable only by this role (Better Auth).
 CREATE ROLE auth_user LOGIN PASSWORD 'auth_user' NOBYPASSRLS;
 CREATE DATABASE sge_test_core OWNER app_owner;
+-- Job queue worker: jobs/schedules only (docs/ARCHITECTURE.md §6).
+CREATE ROLE worker_user LOGIN PASSWORD 'worker_user' NOBYPASSRLS;
+CREATE DATABASE sge_test_jobs OWNER app_owner;

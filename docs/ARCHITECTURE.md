@@ -147,3 +147,20 @@ OAuth refresh tokens, API keys, SMTP and WordPress passwords are stored encrypte
 - Health endpoints for web and worker; queue depth and failure metrics.
 - Error tracking via a self-hosted or free-tier Sentry-compatible service.
 - Backups and restore: `SECURITY.md` §9.
+
+## 11. Decision log
+
+### ADR-001 (M3): custom Postgres job queue instead of pg-boss
+
+**Context.** pg-boss creates and migrates its own schema at runtime, which our least-privilege roles can't (and shouldn't) do. It relies on session features that misbehave through Neon's transaction-mode pooler, and its tables would sit outside our RLS model.
+
+**Decision.** `packages/jobs` is a small queue on a `jobs` table:
+- **Claiming:** jobs are claimed with `FOR UPDATE SKIP LOCKED` and leases.
+- **Fairness:** a window function interleaves organisations, with a per-organisation concurrency cap.
+- **Reliability:** idempotency keys, exponential backoff, recovery of expired leases, tenant-side cancellation, and chunked continuation with progress, so long jobs resume instead of exhausting retries.
+- **Schedules:** each slot is enqueued exactly once.
+- **Worker role:** the dedicated `worker_user` role can access only `jobs` and `schedules`. It works on tenant data through `app_user` and `withContext(job.organization_id)`.
+
+**Runtime modes:** a long-running worker (VPS), `worker --once` from cron (cPanel), `GET /api/cron/tick` with `Bearer CRON_SECRET` (Vercel Cron or an external scheduler), and `after()` processing of the requesting workspace's jobs (serverless demo). All modes share one runner; concurrent ticks are safe.
+
+**Consequence.** Under heavy contention a claim round may return fewer jobs than requested (claimers skip each other's locked rows); the next round picks them up. The per-organisation cap can be exceeded by at most one job in a race.

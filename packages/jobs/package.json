@@ -1,0 +1,11 @@
+{
+  "name": "@sge/jobs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit", "lint": "echo skip", "test": "vitest run", "build": "echo skip" },
+  "dependencies": { "@sge/db": "workspace:*", "drizzle-orm": "0.45.4" },
+  "devDependencies": { "@types/node": "^22.0.0", "@types/pg": "^8.15.0", "pg": "^8.16.0", "typescript": "^5.9.0", "uuidv7": "^1.0.2", "vitest": "^3.2.0" }
+}

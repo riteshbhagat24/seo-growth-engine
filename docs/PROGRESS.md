@@ -145,9 +145,58 @@ Known gaps / remaining work:
 - **Plan changes** are SQL-only until the platform admin area (M11).
 - **Client-specific dashboards:** client users currently see websites and clients read-only; richer dashboards come as data arrives (audits M4, Search Console M5).
 
-## Next: M3 — Job system & crawler
+## M3 — Job system & crawler ✅ (2026-11-17)
 
-pg-boss worker with per-workspace fairness, schedules, job history UI, and a resumable, polite crawl frontier on top of `safeFetch` (robots.txt, sitemaps). On cPanel the same worker runs in bounded batches from cron.
+Implemented:
+- **`@sge/jobs`: a custom Postgres queue** (ADR-001 in ARCHITECTURE explains why it replaces pg-boss):
+  - safe claiming with `SKIP LOCKED` and leases, plus heartbeats;
+  - fairness across workspaces and per-workspace concurrency caps;
+  - idempotency keys, retries with backoff and permanent failures;
+  - recovery from dead workers and tenant-side cancellation;
+  - chunked continuation with stored progress, exactly-once schedules, and a time-budgeted runner.
+- **Worker role `worker_user`:** job tables only.
+- **Run modes:**
+  - long-running worker;
+  - `worker --once` for cPanel cron;
+  - `/api/cron/tick` (Bearer `CRON_SECRET`) for Vercel Cron or an external scheduler;
+  - `after()` processing of the requesting workspace's jobs, so the Vercel demo works without a separate worker.
+- **Crawler (`@sge/crawler` + `crawl.run` job):**
+  - robots.txt (RFC 9309) and crawl-delay;
+  - sitemap and sitemap-index seeding;
+  - same-site links with URL normalisation (fragments and tracking parameters removed);
+  - nofollow handling and non-HTML skipping;
+  - per-crawl page caps (500 verified, 25 unverified) and monthly plan metering;
+  - resumable frontier.
+- **UI:**
+  - crawl card on each website (start, crawl again, history);
+  - live crawl page (progress bar, auto-refresh, stop, filter by fetched, errors, skipped or queued, titles, HTTP status, timing);
+  - "Jobs" page with background task history;
+  - health check reports `jobs: enabled`.
+- **`scripts/neon-setup.mjs`** now creates only missing roles and keeps existing passwords unless given `--rotate`.
+
+Verified (local, 2026-11-17):
+| Check | Result |
+|---|---|
+| Typecheck (7 packages) and lint | ✅ |
+| `@sge/jobs` (fairness, no double claims, retries/backoff, budget, lease recovery, cancel, schedules, worker role isolation) | ✅ 11/11 |
+| `@sge/crawler` (+ URL normalisation, robots.txt groups, sitemap parsing, link extraction) | ✅ 79/79 |
+| `@sge/core` (+ crawls: polite crawl, resumable slices without re-fetching, page caps, plan limit, robots 5xx, cancel, roles/client scope) | ✅ 181/181 |
+| `@sge/db` schema invariants + isolation (now 14 tenant tables) | ✅ 12/12 |
+| Playwright e2e: M1 12 + M2 7 + M3 2 (cron auth; real crawl of example.com processed in the background with live refresh) | ✅ 21/21 |
+| Neon: worker role created, migrations applied, all three roles verified, existing passwords kept | ✅ |
+
+Bugs caught by the new tests:
+- **Drizzle array expansion:** a JS array in a SQL template became a parameter list. The job-type filter now passes a single string.
+- **Over-tight time slices:** the handler correctly refused to start a fetch it couldn't finish. The test now uses realistic slices.
+
+Known gaps / remaining work:
+- **Periodic ownership re-verification and scheduled crawls:** the schedules table and processor exist, but no UI creates schedules yet (lands with audits in M4).
+- **Vercel Hobby cron runs only once a day.** For frequent processing on the demo, either rely on `after()` processing (in place), or point a free external scheduler such as cron-job.org at `/api/cron/tick` every 5 minutes.
+- **Compressed sitemaps (`.xml.gz`)** aren't read yet; links still get crawled.
+
+## Next: M4 — Technical audit & on-page analysis
+
+Audit rule engine over crawled pages (status codes, redirects, canonicals, titles/meta, headings, images, indexability, duplicates, orphans, sitemap/robots checks), health score, issues UI, PageSpeed Insights / CrUX Core Web Vitals, and the on-page analyzer.
 
 ## Seed directory dataset (draft, needs review)
 

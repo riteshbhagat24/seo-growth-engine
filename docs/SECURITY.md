@@ -126,3 +126,14 @@ Data export per workspace (JSON/CSV), workspace deletion (soft delete for 30 day
 - **Client-scoped access** is enforced by RLS, not only by the UI. A client user can't see other clients or agency-level websites even through raw SQL in their own scope (tested). Members restricted to clients cannot manage clients, invite people or change access.
 - **Plan limits** are checked under a per-workspace advisory lock, so concurrent requests can't exceed them (tested with 6 simultaneous requests). They count the whole workspace, regardless of the actor's client scope.
 - **Malformed ids** from URLs and forms are rejected as "not found" before reaching SQL.
+
+## 13. Implementation notes (M3)
+
+- **Crawler politeness:**
+  - **robots.txt** follows RFC 9309, with a specific group for `SEOGrowthEngineBot` overriding `*`. If robots.txt is missing (404), everything is allowed. If it is unreachable or returns 5xx, the crawler stays out entirely.
+  - **Crawl-delay** is honoured, with a minimum of 1 s between requests.
+  - **Scope:** same site only (host or its www twin); nofollow links and meta robots nofollow are respected; non-HTML files are skipped.
+  - **Caps:** 500 pages per crawl for verified sites and 25 for unverified ones, plus the monthly plan allowance. Robots-blocked pages aren't billed.
+  - **Requests** go through `safeFetch` (SSRF protection) with an identifying User-Agent.
+- **The cron endpoint** requires `Authorization: Bearer CRON_SECRET` (constant-time compare) and is otherwise 401. The crawl progress endpoint requires a session and workspace membership. Member-triggered processing (`after()`) only claims that member's workspace's jobs.
+- **The worker** uses a role that can't read tenant or identity tables; tenant work runs under RLS in the job's own workspace.

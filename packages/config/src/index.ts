@@ -18,6 +18,8 @@ const serverSchema = z.object({
   APP_DATABASE_URL: z.string().url(),
   /** Identity connection as `auth_user` (schema "auth" only). */
   AUTH_DATABASE_URL: optional(z.string().url()),
+  /** Job-queue connection as `worker_user` (jobs/schedules tables only). Needed to process jobs. */
+  WORKER_DATABASE_URL: optional(z.string().url()),
   /** Owner connection, used only by migrations and admin tooling. */
   DATABASE_URL_OWNER: optional(z.string().url()),
   APP_URL: z.string().url().default("http://localhost:3000"),

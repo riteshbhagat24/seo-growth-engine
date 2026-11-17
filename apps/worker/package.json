@@ -9,14 +9,16 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "echo skip",
-    "test": "vitest run",
+    "test": "echo \"worker logic is tested in @sge/jobs\"",
     "build": "echo skip"
   },
   "dependencies": {
     "@sge/config": "workspace:*",
     "@sge/db": "workspace:*",
     "dotenv": "^17.0.0",
-    "drizzle-orm": "0.45.4"
+    "drizzle-orm": "0.45.4",
+    "@sge/core": "workspace:*",
+    "@sge/jobs": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

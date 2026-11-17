@@ -22,6 +22,7 @@ export default async function WorkspaceLayout({ children, params }: LayoutProps<
     { href: `/w/${slug}/clients`, label: "Clients", show: ws.type === "agency" },
     { href: `/w/${slug}/settings`, label: "Settings", show: can(access.role, "workspace.update") || can(access.role, "branding.manage") },
     { href: `/w/${slug}/settings/members`, label: "Members", show: can(access.role, "members.view") },
+    { href: `/w/${slug}/settings/jobs`, label: "Jobs", show: can(access.role, "work.run") },
     { href: `/w/${slug}/settings/usage`, label: "Plan & usage", show: can(access.role, "plan.view") },
     { href: `/w/${slug}/settings/audit`, label: "Audit log", show: can(access.role, "audit.view") }
   ].filter((n) => n.show);

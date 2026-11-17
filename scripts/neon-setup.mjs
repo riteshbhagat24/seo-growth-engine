@@ -1,14 +1,18 @@
-// One-time (re-runnable) setup of a Neon database for this app.
-//   node scripts/neon-setup.mjs
-// Reads .env.neon (owner connection + hosts). Creates/rotates the restricted
-// roles, applies migrations, verifies isolation, then writes the runtime
-// connection strings back into .env.neon. Never prints secrets.
+// Set up or upgrade a Neon database for this app (re-runnable).
+//   node scripts/neon-setup.mjs            create missing roles, migrate, verify
+//   node scripts/neon-setup.mjs --rotate   also give every role a new password
+// Reads .env.neon (owner connection + hosts) and writes the runtime connection
+// strings back into it. Existing passwords are kept unless --rotate is given,
+// so a running deployment isn't disconnected. Never prints secrets.
 import { readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import pg from "pg";
 
 const FILE = ".env.neon";
+const ROTATE = process.argv.includes("--rotate");
+const ROLES = { app_user: "APP_DATABASE_URL", auth_user: "AUTH_DATABASE_URL", worker_user: "WORKER_DATABASE_URL" };
+
 const env = Object.fromEntries(
   readFileSync(FILE, "utf8")
     .split(/\r?\n/)
@@ -19,21 +23,32 @@ const env = Object.fromEntries(
 for (const k of ["DATABASE_URL_OWNER", "NEON_POOLED_HOST", "NEON_DATABASE"]) {
   if (!env[k]) throw new Error(`${FILE} is missing ${k}`);
 }
+const step = (msg) => console.log(`• ${msg}`);
+const url = (role, pw) => `postgresql://${role}:${pw}@${env.NEON_POOLED_HOST}/${env.NEON_DATABASE}?sslmode=verify-full`;
+const knownPassword = (role) => {
+  const existing = env[ROLES[role]];
+  if (!existing) return null;
+  const u = new URL(existing);
+  return u.username === role ? decodeURIComponent(u.password) : null;
+};
 
+// 1. Roles: create missing ones; keep existing passwords unless rotating.
 const owner = new pg.Client({ connectionString: env.DATABASE_URL_OWNER });
 await owner.connect();
-const step = (msg) => console.log(`• ${msg}`);
-
-// 1. Restricted roles. Rotating passwords on every run keeps this re-runnable.
 const passwords = {};
-for (const role of ["app_user", "auth_user"]) {
-  const pw = randomBytes(24).toString("base64url");
-  passwords[role] = pw;
+for (const role of Object.keys(ROLES)) {
   const exists = (await owner.query("select 1 from pg_roles where rolname = $1", [role])).rowCount > 0;
-  // Identifiers are fixed literals; the password is passed through format(%L) server-side.
+  const keep = exists && !ROTATE ? knownPassword(role) : null;
+  if (keep) {
+    passwords[role] = keep;
+    step(`role ${role}: exists, password kept`);
+    continue;
+  }
+  const pw = randomBytes(24).toString("base64url"); // [A-Za-z0-9_-] only: safe inside the literal below
+  passwords[role] = pw;
   const verb = exists ? `ALTER ROLE ${role}` : `CREATE ROLE ${role}`;
   await owner.query(`DO $$ BEGIN EXECUTE format('${verb} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', '${pw}'); END $$`);
-  step(`${exists ? "rotated password for" : "created"} role ${role}`);
+  step(`role ${role}: ${exists ? "password rotated" : "created"}`);
 }
 await owner.end();
 
@@ -45,44 +60,50 @@ execFileSync("pnpm", ["--filter", "@sge/db", "migrate"], {
 });
 step("migrations applied");
 
-// 3. Verify isolation through the pooled endpoint, exactly as the app connects.
-const url = (role) =>
-  `postgresql://${role}:${passwords[role]}@${env.NEON_POOLED_HOST}/${env.NEON_DATABASE}?sslmode=verify-full`;
-const app = new pg.Client({ connectionString: url("app_user") });
+// 3. Verify isolation through the pooled endpoint, exactly as the apps connect.
+const blocked = (c, q) => c.query(q).then(() => false, () => true);
+
+const app = new pg.Client({ connectionString: url("app_user", passwords.app_user) });
 await app.connect();
-const role = (
+const r = (
   await app.query(`select r.rolsuper, r.rolbypassrls,
      exists (select 1 from pg_tables t where t.schemaname='public' and t.tableowner=current_user) as owns
      from pg_roles r where r.rolname = current_user`)
 ).rows[0];
-if (role.rolsuper || role.rolbypassrls || role.owns) throw new Error("app_user is privileged: isolation not guaranteed");
-const visible = (await app.query("select count(*)::int as n from organizations")).rows[0].n;
-if (visible !== 0) throw new Error(`fail-closed check failed: ${visible} organizations visible without a tenant`);
-const authBlocked = await app.query("select 1 from auth.users limit 1").then(() => false, () => true);
-if (!authBlocked) throw new Error("app_user can read auth.users");
-const product = (await app.query("select value->>'name' as name from platform_settings where key='product'")).rows[0];
+if (r.rolsuper || r.rolbypassrls || r.owns) throw new Error("app_user is privileged: isolation not guaranteed");
+for (const table of ["organizations", "websites", "jobs", "crawls"]) {
+  const n = (await app.query(`select count(*)::int as n from ${table}`)).rows[0].n;
+  if (n !== 0) throw new Error(`fail-closed check failed: ${n} ${table} rows visible without a tenant`);
+}
+if (!(await blocked(app, "select 1 from auth.users limit 1"))) throw new Error("app_user can read auth.users");
 await app.end();
 step("app_user: unprivileged, fail-closed, cannot read identity tables");
 
-const auth = new pg.Client({ connectionString: url("auth_user") });
+const auth = new pg.Client({ connectionString: url("auth_user", passwords.auth_user) });
 await auth.connect();
 await auth.query("select count(*) from auth.users");
-const tenantBlocked = await auth.query("select 1 from public.organizations limit 1").then(() => false, () => true);
+if (!(await blocked(auth, "select 1 from public.organizations limit 1"))) throw new Error("auth_user can read tenant tables");
 await auth.end();
-if (!tenantBlocked) throw new Error("auth_user can read tenant tables");
 step("auth_user: identity tables only");
-step(`platform product name: ${product?.name}`);
+
+const worker = new pg.Client({ connectionString: url("worker_user", passwords.worker_user) });
+await worker.connect();
+await worker.query("select count(*) from jobs");
+for (const q of ["select 1 from organizations limit 1", "select 1 from websites limit 1", "select 1 from auth.users limit 1"]) {
+  if (!(await blocked(worker, q))) throw new Error(`worker_user can run: ${q}`);
+}
+await worker.end();
+step("worker_user: job tables only");
 
 // 4. Persist runtime connection strings (local, gitignored).
 const kept = readFileSync(FILE, "utf8")
   .split(/\r?\n/)
-  .filter((l) => !/^(APP_DATABASE_URL|AUTH_DATABASE_URL)=/.test(l) && !/^# Runtime connections/.test(l));
+  .filter((l) => !/^(APP_DATABASE_URL|AUTH_DATABASE_URL|WORKER_DATABASE_URL)=/.test(l) && !/^# Runtime connections/.test(l));
 while (kept.length && kept.at(-1) === "") kept.pop();
 kept.push(
   "# Runtime connections (pooled), generated by scripts/neon-setup.mjs",
-  `APP_DATABASE_URL=${url("app_user")}`,
-  `AUTH_DATABASE_URL=${url("auth_user")}`,
+  ...Object.entries(ROLES).map(([role, key]) => `${key}=${url(role, passwords[role])}`),
   ""
 );
 writeFileSync(FILE, kept.join("\n"));
-step(`${FILE} updated with APP_DATABASE_URL and AUTH_DATABASE_URL`);
+step(`${FILE} updated (${Object.values(ROLES).join(", ")})`);

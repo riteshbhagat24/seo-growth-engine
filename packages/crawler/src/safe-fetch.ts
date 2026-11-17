@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 import { Agent, request } from "undici";
 import { isPublicAddress } from "./ip-guard";
 
-export const USER_AGENT = "SEOGrowthEngineBot/1.0 (+https://seo-growth-engine-nine.vercel.app/bot)";
+export const USER_AGENT = "Mozilla/5.0 (compatible; SEOGrowthEngineBot/1.0; +https://seo-growth-engine-nine.vercel.app/bot)";
 
 export type Resolver = (hostname: string) => Promise<{ address: string; family: number }[]>;
 

@@ -169,3 +169,16 @@ High-volume tables (`audit_pages`, `audit_issues`) are pruned by retention polic
 - `membership_clients` + `memberships.all_clients`: per-member client restriction. The `client` role is always restricted.
 - `websites`: `client_id`, verification status/method/token/timestamps/last error.
 - **Client scope in RLS:** `app_client_allowed(client_id)` reads `app.client_scope` (`*` or a list of ids). RESTRICTIVE policies on `clients` and `websites` apply it on top of tenant isolation. Workspace-level rows (`client_id` NULL) are visible only with `*`. Every request sets the scope from the member's assignments, re-read inside the same transaction.
+
+## 16. As built (M3)
+
+- `jobs`: queue and history.
+  - `organization_id` NULL = system job.
+  - RLS policies: `tenant_isolation`; `worker_all` scoped `TO worker_user`; and a RESTRICTIVE `website_visible` scoped `TO app_user`, so client-restricted members only see jobs for visible websites.
+  - Partial indexes on due and running jobs.
+- `schedules`: recurring work. Each slot enqueues one job, idempotent on `schedule:<id>:<epoch>`.
+- `crawls` and `crawl_pages` (the frontier plus fetch results):
+  - Composite FKs keep both inside one workspace (`crawl_pages(crawl_id, organization_id)` → `crawls`; `crawls(website_id, organization_id)` → `websites`).
+  - RESTRICTIVE policies tie visibility to the website's client scope.
+  - Unique `(crawl_id, url_hash)` de-duplicates the frontier.
+- Role `worker_user`: SELECT/INSERT/UPDATE/DELETE on `jobs` and `schedules` only. It can't read organisations, websites or identity tables (tested locally and on Neon).

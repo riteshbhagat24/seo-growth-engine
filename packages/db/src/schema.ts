@@ -374,6 +374,144 @@ export const websites = pgTable(
   ]
 );
 
+/* ─────────────────────────────── Jobs (M3) ──────────────────────────────── */
+
+export const jobStatus = pgEnum("job_status", ["queued", "running", "succeeded", "failed", "cancelled"]);
+
+/**
+ * Durable job queue + history. app_user sees its tenant's jobs (RLS); the
+ * worker claims across tenants through the narrowly-privileged worker_user.
+ * organization_id NULL = system job (invisible to tenants).
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: id(),
+    organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }),
+    websiteId: uuid("website_id"),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    status: jobStatus("status").notNull().default("queued"),
+    priority: integer("priority").notNull().default(0),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(5),
+    lockedBy: text("locked_by"),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    idempotencyKey: text("idempotency_key").unique(),
+    progress: jsonb("progress").$type<Record<string, unknown>>(),
+    lastError: text("last_error"),
+    createdByUserId: uuid("created_by_user_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    ...timestamps
+  },
+  (t) => [
+    index("jobs_due_idx").on(t.runAt, t.priority).where(sql`status = 'queued'`),
+    index("jobs_running_idx").on(t.lockedUntil).where(sql`status = 'running'`),
+    index("jobs_org_created_idx").on(t.organizationId, t.createdAt)
+  ]
+);
+
+/** Recurring work (e.g. weekly crawl). The scheduler enqueues due rows idempotently. */
+export const schedules = pgTable(
+  "schedules",
+  {
+    id: id(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    websiteId: uuid("website_id"),
+    jobType: text("job_type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    intervalMinutes: integer("interval_minutes").notNull(),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    enabled: boolean("enabled").notNull().default(true),
+    ...timestamps
+  },
+  (t) => [
+    index("schedules_due_idx").on(t.nextRunAt).where(sql`enabled`),
+    unique("schedules_website_type_uq").on(t.websiteId, t.jobType)
+  ]
+);
+
+/* ────────────────────────────── Crawls (M3) ─────────────────────────────── */
+
+export const crawlStatus = pgEnum("crawl_status", ["queued", "running", "completed", "cancelled", "failed", "limit_reached"]);
+export const crawlPageStatus = pgEnum("crawl_page_status", ["queued", "fetched", "error", "skipped"]);
+
+export const crawls = pgTable(
+  "crawls",
+  {
+    id: id(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    websiteId: uuid("website_id").notNull(),
+    status: crawlStatus("status").notNull().default("queued"),
+    startUrl: text("start_url").notNull(),
+    maxPages: integer("max_pages").notNull(),
+    maxDepth: integer("max_depth").notNull().default(10),
+    pagesFound: integer("pages_found").notNull().default(0),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    robotsTxt: text("robots_txt"),
+    robotsStatus: integer("robots_status"),
+    crawlDelayMs: integer("crawl_delay_ms").notNull().default(1000),
+    sitemapUrls: integer("sitemap_urls").notNull().default(0),
+    error: text("error"),
+    jobId: uuid("job_id"),
+    createdByUserId: uuid("created_by_user_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    ...timestamps
+  },
+  (t) => [
+    unique("crawls_id_org_uq").on(t.id, t.organizationId),
+    index("crawls_website_idx").on(t.websiteId, t.createdAt),
+    foreignKey({
+      name: "crawls_website_fk",
+      columns: [t.websiteId, t.organizationId],
+      foreignColumns: [websites.id, websites.organizationId]
+    }).onDelete("cascade")
+  ]
+);
+
+/** Crawl frontier + fetch results. Resumable: a crawl continues from queued rows. */
+export const crawlPages = pgTable(
+  "crawl_pages",
+  {
+    id: id(),
+    organizationId: uuid("organization_id").notNull(),
+    crawlId: uuid("crawl_id").notNull(),
+    url: text("url").notNull(),
+    urlHash: text("url_hash").notNull(),
+    depth: integer("depth").notNull(),
+    source: text("source").notNull().default("link"), // start | link | sitemap
+    status: crawlPageStatus("status").notNull().default("queued"),
+    httpStatus: integer("http_status"),
+    finalUrl: text("final_url"),
+    contentType: text("content_type"),
+    bytes: integer("bytes"),
+    durationMs: integer("duration_ms"),
+    title: text("title"),
+    linksOut: integer("links_out"),
+    skipReason: text("skip_reason"),
+    error: text("error"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    createdAt
+  },
+  (t) => [
+    unique("crawl_pages_crawl_url_uq").on(t.crawlId, t.urlHash),
+    index("crawl_pages_queue_idx").on(t.crawlId, t.depth, t.createdAt).where(sql`status = 'queued'`),
+    foreignKey({
+      name: "crawl_pages_crawl_fk",
+      columns: [t.crawlId, t.organizationId],
+      foreignColumns: [crawls.id, crawls.organizationId]
+    }).onDelete("cascade")
+  ]
+);
+
 export type User = typeof users.$inferSelect;
 export type Organization = typeof organizations.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
@@ -383,3 +521,6 @@ export type Website = typeof websites.$inferSelect;
 export type Client = typeof clients.$inferSelect;
 export type Plan = typeof plans.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;
+export type Job = typeof jobs.$inferSelect;
+export type Crawl = typeof crawls.$inferSelect;
+export type CrawlPage = typeof crawlPages.$inferSelect;

@@ -13,6 +13,7 @@
     "@sge/config": "workspace:*",
     "@sge/core": "workspace:^",
     "@sge/db": "workspace:*",
+    "@sge/jobs": "workspace:^",
     "better-auth": "1.7.25",
     "next": "16.4.6",
     "nodemailer": "^7",

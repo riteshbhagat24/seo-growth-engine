@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AppError, can, getWebsite, isUuidLike, listClients, verificationInstructions } from "@sge/core";
+import { AppError, can, getWebsite, isUuidLike, listClients, listCrawls, verificationInstructions } from "@sge/core";
+import { CrawlStatus } from "@/components/crawl-status";
 import { ActionForm, SubmitButton } from "@/components/form";
 import { Alert, Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { VerificationBadge } from "@/components/verification-badge";
 import { db } from "@/lib/db";
 import { currentActor, requireWorkspace } from "@/lib/session";
 import { deleteWebsiteAction, updateWebsiteAction, verifyWebsiteAction } from "../actions";
+import { startCrawlAction } from "./crawls/actions";
+
+// Starting a crawl processes the first batch right after the response (see lib/jobs).
+export const maxDuration = 60;
 
 function Code({ children }: { children: string }) {
   return (
@@ -28,6 +33,9 @@ export default async function WebsitePage({ params }: PageProps<"/w/[slug]/websi
   const manage = can(access.role, "websites.manage");
   const isAgency = access.workspace.type === "agency";
   const clients = manage && isAgency ? await listClients(db(), actor, access) : [];
+  const crawls = await listCrawls(db(), actor, access, w.id, 5);
+  const crawlActive = crawls.some((c) => c.status === "queued" || c.status === "running");
+  const canCrawl = can(access.role, "work.run");
   const ins = verificationInstructions(w);
   const verify = verifyWebsiteAction.bind(null, slug, w.id);
 
@@ -133,6 +141,38 @@ export default async function WebsitePage({ params }: PageProps<"/w/[slug]/websi
         ) : (
           <Alert>This website hasn't been verified yet.</Alert>
         )}
+
+        <Card>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-semibold">Site crawl</h2>
+              <p className="mt-1 text-sm text-muted">
+                Visits your pages like a search engine would, respecting robots.txt.{" "}
+                {w.verificationStatus === "verified" ? "Up to 500 pages per crawl." : "Unverified sites: up to 25 pages."}
+              </p>
+            </div>
+            {canCrawl && !crawlActive && (
+              <ActionForm action={startCrawlAction.bind(null, slug, w.id)}>
+                <SubmitButton pending="Starting…">{crawls.length ? "Crawl again" : "Start crawl"}</SubmitButton>
+              </ActionForm>
+            )}
+          </div>
+          {crawls.length > 0 && (
+            <ul className="mt-4 divide-y divide-border border-t border-border text-sm">
+              {crawls.map((c) => (
+                <li key={c.id} className="flex items-center justify-between gap-3 py-2.5">
+                  <Link href={`/w/${slug}/websites/${w.id}/crawls/${c.id}`} className="text-brand hover:underline">
+                    {c.createdAt.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}
+                  </Link>
+                  <span className="flex items-center gap-3 text-muted">
+                    {c.pagesFetched} pages
+                    <CrawlStatus status={c.status} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
 
         {manage && (
           <Card>

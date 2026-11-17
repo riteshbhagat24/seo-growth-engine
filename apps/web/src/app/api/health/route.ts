@@ -40,5 +40,12 @@ export async function GET() {
     return Response.json({ status: "error", config: "ok", database: "ok", isolation: "unsafe_role" }, { status: 503 });
   }
   // "log" = demo mode: emails are not delivered (see MAIL_TRANSPORT).
-  return Response.json({ status: "ok", config: "ok", database: "ok", isolation: "ok", mail: serverEnv().MAIL_TRANSPORT });
+  return Response.json({
+    status: "ok",
+    config: "ok",
+    database: "ok",
+    isolation: "ok",
+    mail: serverEnv().MAIL_TRANSPORT,
+    jobs: serverEnv().WORKER_DATABASE_URL ? "enabled" : "not_configured"
+  });
 }
