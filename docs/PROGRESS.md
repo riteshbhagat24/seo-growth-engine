@@ -123,3 +123,12 @@ Plan definitions and usage limits (no billing), clients and client assignment, t
 - **Link type:** every row's `link_type_known` is `unknown`; no row is assumed to be dofollow. The link verifier (M7) will fill this in from real pages.
 - **Check first:** SelectedFirms, SuperbCompanies and MarTech Series may be paid-only.
 - **Excluded:** paid-only (BetaList, Awwwards, CSS Design Awards, Forbes Councils, Entrepreneur), closed (Uneed, Social Media Today contributors), dead or broken (DesignFirms, ClickIndia TLS), partner-status-only (Semrush, BrightLocal, HubSpot, Google Partners), and link-farm-like lists.
+
+## Demo deployment ✅ (2026-11-17)
+
+- **URL:** https://seo-growth-engine-nine.vercel.app (Vercel Hobby, function region Singapore `sin1`)
+- **Database:** Neon free tier via the Vercel integration, region ap-southeast-1. Set up by `scripts/neon-setup.mjs`: restricted `app_user` and `auth_user` roles, migrations applied, isolation verified over the pooled endpoint.
+- **Live health check:** `{"status":"ok","config":"ok","database":"ok","isolation":"ok","mail":"log"}`
+- **Mail:** demo mode (`MAIL_TRANSPORT=log`). Verification, reset and sign-in links appear in Vercel → Logs (search `[mail:log]`). Switch to SMTP before real users sign up.
+- **Vercel variables:** the app reads `APP_DATABASE_URL` / `AUTH_DATABASE_URL` only. The integration's `DATABASE_URL`, `PG*` and `POSTGRES_*` (owner role) are present but unused, and `/api/health` reports `isolation: unsafe_role` if the app ever connects with a privileged role.
+- Lessons: Vercel's bulk paste dropped two base64 secrets, so secrets are now generated as hex; `/api/health` now names misconfigured variables (names only) and database error codes.
