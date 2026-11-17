@@ -12,8 +12,11 @@ export async function GET() {
   try {
     serverEnv();
   } catch (err) {
-    console.error("[health] configuration error:", (err as Error).message);
-    return Response.json({ status: "error", config: "invalid" }, { status: 503 });
+    const message = (err as Error).message;
+    console.error("[health] configuration error:", message);
+    // serverEnv() errors list variable NAMES only (never values), e.g. "Required in production: X, Y".
+    const problem = message.replace(/^(Invalid server environment|Required in production):\s*/, "").slice(0, 300);
+    return Response.json({ status: "error", config: "invalid", problem }, { status: 503 });
   }
 
   let role: { superuser: boolean; bypass: boolean; owns_tables: boolean } | undefined;
