@@ -10,6 +10,7 @@ import {
   PermanentJobError,
   processSchedules,
   recoverExpired,
+  requeueJob,
   runTick,
   type JobHandler
 } from "../src/index";
@@ -214,5 +215,30 @@ describe("leases, cancellation and schedules", () => {
     expect(queued).toHaveLength(1);
     const [after] = await workerDb.select().from(schema.schedules).where(eq(schema.schedules.id, s!.id));
     expect(after!.nextRunAt.getTime()).toBeGreaterThan(Date.now() + 50 * 60_000);
+  });
+});
+
+describe("type filters and tenant requeue", () => {
+  it("a tick limited to some types leaves the others queued (not failed)", async () => {
+    const org = await makeOrg();
+    const [mine, other] = [t("web"), t("browser")];
+    const a = await add(org, mine);
+    const b = await add(org, other);
+    await runTick({ workerDb, appDb, handlers: { [mine]: async () => ({ done: true }) }, workerId: "typed", budgetMs: 10_000, maxJobMs: 5_000, organizationId: org, types: [mine] });
+    expect((await jobRow(a.id)).status).toBe("succeeded");
+    expect((await jobRow(b.id)).status).toBe("queued");
+  });
+
+  it("a workspace can requeue its own failed job, never another workspace's", async () => {
+    const [a, b] = [await makeOrg(), await makeOrg()];
+    const type = t("requeue");
+    const j = await add(a, type, { maxAttempts: 1 });
+    await runTick({ workerDb, appDb, handlers: { [type]: async () => { throw new PermanentJobError("nope"); } }, workerId: "rq", budgetMs: 10_000, maxJobMs: 5_000, organizationId: a });
+    expect((await jobRow(j.id)).status).toBe("failed");
+    expect(await withContext(appDb, { organizationId: b }, (tx) => requeueJob(tx, j.id))).toBe(false);
+    expect((await jobRow(j.id)).status).toBe("failed");
+    expect(await withContext(appDb, { organizationId: a }, (tx) => requeueJob(tx, j.id))).toBe(true);
+    expect(await jobRow(j.id)).toMatchObject({ status: "queued", attempts: 0, lastError: null });
+    expect(await withContext(appDb, { organizationId: a }, (tx) => requeueJob(tx, j.id))).toBe(false); // only failed/cancelled
   });
 });

@@ -2,6 +2,7 @@ import "server-only";
 import { after } from "next/server";
 import { createDb } from "@sge/db";
 import { jobHandlers } from "@sge/core";
+import { backlinkJobHandlers } from "@sge/backlinks";
 import { runTick } from "@sge/jobs";
 import { serverEnv } from "@sge/config";
 import { db } from "./db";
@@ -19,10 +20,13 @@ function workerDb() {
 }
 
 export function processJobs(opts: { organizationId?: string; budgetMs?: number } = {}) {
+  // No browser here: browser-form submissions are left (queued) for the worker, which has Chromium.
+  const handlers = { ...jobHandlers({ psiApiKey: serverEnv().PSI_API_KEY }), ...backlinkJobHandlers({ browser: false, workerId: "web" }) };
   return runTick({
     workerDb: workerDb(),
     appDb: db(),
-    handlers: jobHandlers({ psiApiKey: serverEnv().PSI_API_KEY }),
+    handlers,
+    types: Object.keys(handlers),
     workerId: `web:${process.pid}:${Math.random().toString(36).slice(2, 8)}`,
     budgetMs: opts.budgetMs ?? BUDGET_MS,
     maxJobMs: Math.min(40_000, (opts.budgetMs ?? BUDGET_MS) - 3_000),

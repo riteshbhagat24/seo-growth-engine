@@ -206,6 +206,19 @@ export async function cancelJob(tx: Tx, jobId: string): Promise<boolean> {
   return r.length === 1;
 }
 
+/**
+ * Tenant-side retry of a failed or cancelled job (app_user tx in tenant context; RLS limits it to the
+ * workspace's own jobs). Handlers must re-check their own state: a requeue never forces work to repeat.
+ */
+export async function requeueJob(tx: Tx, jobId: string): Promise<boolean> {
+  const r = await tx
+    .update(jobs)
+    .set({ status: "queued", attempts: 0, runAt: new Date(), lastError: null, finishedAt: null, lockedBy: null, lockedUntil: null })
+    .where(and(eq(jobs.id, jobId), sql`${jobs.status} in ('failed', 'cancelled')`))
+    .returning({ id: jobs.id });
+  return r.length === 1;
+}
+
 /** Enqueues every due schedule exactly once per slot, then advances it. */
 export async function processSchedules(workerDb: Db, limit = 100): Promise<number> {
   const r = await workerDb.execute(sql`

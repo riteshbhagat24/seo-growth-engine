@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { safeFetch, SafeFetchError, type SafeFetchOptions } from "../src/safe-fetch";
+import { safeFetch, SafeFetchError, vetUrl, type SafeFetchOptions } from "../src/safe-fetch";
 
 let server: Server;
 let port = 0;
@@ -20,6 +20,15 @@ beforeAll(async () => {
       res.writeHead(200, { "content-type": "text/html" });
       return res.end("x".repeat(64 * 1024));
     }
+    if (path === "/echo" && req.method === "POST") {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      return req.on("end", () =>
+        res.writeHead(201, { "content-type": "application/json", "set-cookie": ["a=1; Path=/", "b=2; Path=/"], "retry-after": "7" })
+          .end(JSON.stringify({ method: req.method, body, type: req.headers["content-type"] }))
+      );
+    }
+    if (path === "/post-see-other" && req.method === "POST") return res.writeHead(303, { location: "/ok" }).end();
     if (path === "/png") return res.writeHead(200, { "content-type": "image/png" }).end("PNG");
     if (path === "/slow") return setTimeout(() => res.writeHead(200, { "content-type": "text/html" }).end("late"), 2_000);
     res.writeHead(404, { "content-type": "text/html" }).end("nope");
@@ -113,5 +122,41 @@ describe("safeFetch: against a fixture server", () => {
   it("returns non-2xx responses rather than throwing", async () => {
     const r = await safeFetch(`http://site.test:${port}/missing`, fixture);
     expect(r.status).toBe(404);
+  });
+});
+
+describe("safeFetch: submissions (POST) and headers", () => {
+  it("posts a body and returns every response header", async () => {
+    const r = await safeFetch(`http://site.test:${port}/echo`, {
+      ...fixture,
+      method: "POST",
+      body: JSON.stringify({ a: 1 }),
+      headers: { "content-type": "application/json" },
+      contentTypes: ["application/json"]
+    });
+    expect(r.status).toBe(201);
+    expect(JSON.parse(r.body)).toEqual({ method: "POST", body: '{"a":1}', type: "application/json" });
+    expect(r.responseHeaders?.["set-cookie"]).toEqual(["a=1; Path=/", "b=2; Path=/"]);
+    expect(r.responseHeaders?.["retry-after"]).toBe("7");
+  });
+
+  it("turns a POST into a GET after 303, still re-validating the hop", async () => {
+    const r = await safeFetch(`http://site.test:${port}/post-see-other`, { ...fixture, method: "POST", body: "x=1" });
+    expect(r.status).toBe(200);
+    expect(r.redirects).toEqual([`http://site.test:${port}/ok`]);
+  });
+
+  it("can return redirects instead of following them", async () => {
+    const r = await safeFetch(`http://site.test:${port}/to-metadata`, { ...fixture, followRedirects: false });
+    expect(r.status).toBe(302);
+    expect(r.responseHeaders?.location).toBe("http://169.254.169.254/latest/meta-data/");
+  });
+
+  it("vetUrl resolves once and refuses private answers (for the browser egress proxy)", async () => {
+    const v = await vetUrl(`http://site.test:${port}/`, fixture);
+    expect(v.address).toBe("127.0.0.1");
+    expect(await code(vetUrl("http://internal.test/", { resolver }))).toBe("blocked_address");
+    expect(await code(vetUrl("http://169.254.169.254/"))).toBe("blocked_address");
+    expect(await code(vetUrl("gopher://site.test/"))).toBe("blocked_scheme");
   });
 });

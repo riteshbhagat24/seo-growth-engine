@@ -11,3 +11,4 @@ CREATE DATABASE sge_test_core OWNER app_owner;
 -- Job queue worker: jobs/schedules only (docs/ARCHITECTURE.md §6).
 CREATE ROLE worker_user LOGIN PASSWORD 'worker_user' NOBYPASSRLS;
 CREATE DATABASE sge_test_jobs OWNER app_owner;
+CREATE DATABASE sge_test_backlinks OWNER app_owner;

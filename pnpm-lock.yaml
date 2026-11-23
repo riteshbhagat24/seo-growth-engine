@@ -20,6 +20,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@sge/backlinks':
+        specifier: workspace:^
+        version: link:../../packages/backlinks
       '@sge/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -93,6 +96,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@sge/backlinks':
+        specifier: workspace:^
+        version: link:../../packages/backlinks
       '@sge/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -121,6 +127,55 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
+
+  packages/backlinks:
+    dependencies:
+      '@sge/core':
+        specifier: workspace:^
+        version: link:../core
+      '@sge/crawler':
+        specifier: workspace:^
+        version: link:../crawler
+      '@sge/db':
+        specifier: workspace:*
+        version: link:../db
+      '@sge/jobs':
+        specifier: workspace:^
+        version: link:../jobs
+      cheerio:
+        specifier: ^1.1.0
+        version: 1.2.0
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      zod:
+        specifier: ^4.1.0
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
+      '@types/pg':
+        specifier: ^8.15.0
+        version: 8.23.1
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1)
+      pg:
+        specifier: ^8.16.0
+        version: 8.23.1
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      uuidv7:
+        specifier: ^1.0.2
+        version: 1.2.1
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)

@@ -193,3 +193,20 @@ OAuth refresh tokens, API keys, SMTP and WordPress passwords are stored encrypte
 **UI.**
 - **Layout:** a sidebar shell (client component, for active states and the mobile drawer) wraps every workspace page, and each website has its own tabbed area under `/websites/[id]/…`.
 - **Charts:** a small SVG component, so they render on the server, need no chart library, and follow the data-visualisation rules: single series, no dual axes, keyboard-readable, with a table view.
+
+### ADR-004 (M6): the backlink engine as `@sge/backlinks`
+
+**Context.** The backlink acquisition engine (discovery, scoring, fact-checked assets, submission adapters, verification and recovery) was first built and tested as a standalone app with its own auth, tenancy tables, job queue and crawler. It had to join this monorepo without duplicating that infrastructure. The full mapping is in `docs/BACKLINKS_INTEGRATION.md`.
+
+**Decision.**
+- **One package, `@sge/backlinks`,** depending on `@sge/core` (workspaces, roles, plans, secrets), `@sge/jobs` (queue), `@sge/crawler` (safe fetch, robots) and `@sge/db`. Nothing in `core` depends on it.
+- **Parameterised SQL inside Drizzle transactions.** The engine's ~200 statements run through a small `SqlTx` bridge on the *same* connection and transaction that `withContext` / `inWorkspace` opened, so the tenant settings and RLS apply exactly as they do to Drizzle queries. The tables are still declared in `schema.ts` and migrated by drizzle-kit.
+- **Jobs on the shared queue:** `backlinks.discover`, `qualify`, `plan`, `execute`, `execute_browser`, `verify` and a daily per-website `backlinks.tick` schedule. Handlers run as `app_user` in the job's workspace. Deferrals (paused campaign, rate limit, plan allowance) use `{ continue }`, so they don't use up attempts.
+- **Browser automation only in the worker.** `execute_browser` jobs are claimed only by a process that registered that handler (the worker with Chromium); web ticks pass `types` so they never claim or fail them. Playwright is a server-external package and is imported lazily.
+- **Adapter manifests in code** (like the audit rules, ADR-002), shown in the UI with their test status.
+- **Evidence in Postgres** (`bytea`, ≤ 2 MB per item, RLS), because the web app (Vercel or cPanel) can't read the worker's disk.
+
+**Consequences.**
+- Two styles of data access exist side by side (Drizzle query builder and parameterised SQL). New engine code may use either; both are tenant-scoped by the same transaction.
+- The bridge depends on Drizzle's node-postgres transaction exposing its client (`tx.session.client`, drizzle-orm 0.45). It fails loudly if that changes, and the acceptance suite exercises it on every run.
+- Evidence volume counts against the database. Screenshots are typically 50–300 KB; retention by plan is a follow-up.

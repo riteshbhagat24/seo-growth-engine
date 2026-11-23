@@ -221,3 +221,25 @@ High-volume tables (`audit_pages`, `audit_issues`) are pruned by retention polic
 - **`verification_method`** enum gains `gsc`.
 - **Isolation:** every new table has FORCE RLS, `tenant_isolation`, and a RESTRICTIVE `website_visible` policy scoped `TO app_user` (migration 0011). The schema test enforces this.
 - **Deviation from §7:** the tables aren't partitioned yet. Sync writes are idempotent per date window (delete + insert in one transaction), and deleting a website cascades to all its data.
+
+## 19. As built (M6: backlink acquisition)
+
+Migrations `0012_m6_backlinks` (tables, generated) and `0013_m6_backlinks_rls` (seed, triggers, plan limit, RLS). The planned tables in §8–§9 were built under a `backlink_` prefix, following the engine that was tested first as a standalone app (docs/BACKLINKS_INTEGRATION.md):
+
+| Planned (§8–§9) | Built |
+|---|---|
+| `link_sources` | `backlink_sources` (`organization_id` NULL = global catalogue; workspace rows on top) |
+| `opportunities` | `backlink_prospects` (per domain) + `backlink_opportunities` (per page and campaign) |
+| `submissions`, `submission_events` | `backlink_submissions`, `backlink_submission_events` (append-only), `backlink_submission_evidence` (append-only, bytes in Postgres) |
+| `backlinks`, `backlink_checks` | a verified submission *is* the backlink; every check is in `backlink_verifications` |
+| `recovery_tasks` | `backlink_recovery_campaigns` + `backlink_tasks` (all human work: CAPTCHA, login, manual submission, recovery…) |
+| `outreach_threads`, `outreach_messages`, `email_suppressions` | `backlink_outreach` (one row per thread) + `backlink_exclusions` (kind `email` = suppression list) |
+| — | `business_profiles`, `backlink_website_settings`, `backlink_campaigns`, `backlink_campaign_settings`, `backlink_assets`, `backlink_approvals`, `backlink_domain_limits`, `backlink_costs` |
+
+- **Ids** default in the database (`gen_random_uuid()`), because the engine writes with parameterised SQL; events use a `bigserial` for ordering.
+- **Website-level isolation:** campaigns, prospects, opportunities and submissions expose `UNIQUE (id, website_id, organization_id)`, and children reference that triple.
+- **Global rows:** `backlink_sources` and `backlink_domain_limits` add a permissive `global_read` (SELECT) policy for `organization_id IS NULL`; updates and deletes still need `tenant_isolation`, which never matches a global row. Catalogue changes are migrations (lift FORCE RLS for the statement, as 0009 did for plans).
+- **Triggers:** `updated_at` maintenance; `backlinks_check_source_ref()` rejects a `source_id` that is neither global nor the row's own workspace's.
+- **Plans:** new metered limit `backlink_submissions_month` (Free 20, Pro 200, Agency Free 50, Agency 1000); `backlinks_monitored` now counts submissions being monitored (awaiting publication, published, verified or lost).
+- **Seed catalogue:** 139 global sources (the 108 reviewed CSV rows + 31 from the standalone list), all `manual_only` and `unverified`; 4 community sites retired. See `docs/BACKLINKS_INTEGRATION.md` §6.
+- **Jobs and schedules:** the existing `jobs` and `schedules` tables; one `backlinks.tick` schedule per website with an active campaign.

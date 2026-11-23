@@ -36,6 +36,8 @@ export interface TickOptions {
   concurrency?: number;
   perOrgConcurrency?: number;
   organizationId?: string;
+  /** Only claim these job types (e.g. a web tick leaves browser jobs to the worker). Default: any. */
+  types?: string[];
   runSchedules?: boolean;
   now?: () => number;
   log?: (msg: string, meta?: Record<string, unknown>) => void;
@@ -74,7 +76,8 @@ export async function runTick(o: TickOptions): Promise<TickResult> {
       limit: o.concurrency ?? 2,
       leaseSeconds,
       perOrgConcurrency: o.perOrgConcurrency,
-      organizationId: o.organizationId
+      organizationId: o.organizationId,
+      types: o.types
     });
     if (batch.length === 0) break;
     res.claimed += batch.length;

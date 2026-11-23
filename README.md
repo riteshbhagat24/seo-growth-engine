@@ -2,7 +2,7 @@
 
 Multi-tenant SaaS for technical SEO audits, keyword tracking, white-hat backlink acquisition and verified reporting, for individual businesses and for agencies managing many clients.
 
-**Status:** M0 (foundations) and M1 (accounts & workspaces) complete. See [docs/PROGRESS.md](docs/PROGRESS.md). Fully independent of any existing website, repository, database or hosting project. Default product name: Futuready Media (configurable).
+**Status:** M0–M6 complete (accounts and workspaces, plans and websites, jobs and crawler, technical audits, Google data and keywords, backlink acquisition). See [docs/PROGRESS.md](docs/PROGRESS.md). Fully independent of any existing website, repository, database or hosting project. Default product name: Futuready Media (configurable).
 
 ## Documents
 
@@ -14,6 +14,7 @@ Multi-tenant SaaS for technical SEO audits, keyword tracking, white-hat backlink
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, permission matrix, isolation tests, encryption, backups |
 | [docs/MILESTONES.md](docs/MILESTONES.md) | Milestones, definition of done, open decisions |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | Decisions, completed milestones, test evidence |
+| [docs/BACKLINKS_INTEGRATION.md](docs/BACKLINKS_INTEGRATION.md) | How the backlink engine maps onto this codebase: reused vs new, safety guarantees |
 
 ## Ground rules
 

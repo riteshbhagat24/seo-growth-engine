@@ -16,6 +16,11 @@ export interface SafeFetchOptions {
   /** Allowed response content types (prefix match). Default: HTML and plain text. */
   contentTypes?: string[];
   headers?: Record<string, string>;
+  /** Default GET. POST is for permitted form/API submissions (with `body`). */
+  method?: "GET" | "HEAD" | "POST";
+  body?: string | Buffer;
+  /** Default true. false returns 3xx responses as they are. */
+  followRedirects?: boolean;
   /** Injected for tests. */
   resolver?: Resolver;
   /**
@@ -36,6 +41,8 @@ export interface SafeFetchResult {
   redirectStatuses?: number[];
   /** Selected response headers (lower-case names): x-robots-tag. */
   headers?: Record<string, string>;
+  /** Every header of the final response (lower-case names), e.g. set-cookie, retry-after, location. */
+  responseHeaders?: Record<string, string | string[]>;
 }
 
 export type SafeFetchErrorCode =
@@ -58,6 +65,17 @@ export class SafeFetchError extends Error {
     super(message);
     this.name = "SafeFetchError";
   }
+}
+
+/**
+ * Validates a URL and resolves it to one vetted public address, without connecting. For callers that must
+ * open their own pinned connection (the browser egress proxy); everything else should use safeFetch.
+ */
+export async function vetUrl(
+  raw: string,
+  opts: Pick<SafeFetchOptions, "resolver" | "unsafeTestOverrides"> = {}
+): Promise<{ url: URL; address: string; family: number }> {
+  return vet(raw, opts.resolver ?? defaultResolver, opts.unsafeTestOverrides);
 }
 
 /** Validates a URL and resolves it to a single vetted public address. */
@@ -106,6 +124,9 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
   const maxRedirects = opts.maxRedirects ?? 5;
   const contentTypes = opts.contentTypes ?? ["text/html", "application/xhtml+xml", "text/plain"];
   const resolver = opts.resolver ?? defaultResolver;
+  const follow = opts.followRedirects ?? true;
+  let method = opts.method ?? "GET";
+  let body = method === "POST" ? opts.body : undefined;
   const deadline = Date.now() + timeoutMs;
   const redirects: string[] = [];
   const redirectStatuses: number[] = [];
@@ -127,7 +148,8 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new SafeFetchError("timeout", "The site took too long to respond");
       const res = await request(url, {
-        method: "GET",
+        method,
+        body,
         dispatcher: agent,
         headersTimeout: remaining,
         bodyTimeout: remaining,
@@ -135,11 +157,12 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
         headers: {
           "user-agent": USER_AGENT,
           accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+          ...(body !== undefined ? { "content-length": String(Buffer.byteLength(body)) } : {}),
           ...opts.headers
         }
       });
 
-      if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+      if (follow && [301, 302, 303, 307, 308].includes(res.statusCode)) {
         await res.body.dump();
         const location = res.headers.location;
         const next = Array.isArray(location) ? location[0] : location;
@@ -148,11 +171,16 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
         current = new URL(next, url).toString();
         redirects.push(current);
         redirectStatuses.push(res.statusCode);
+        // Browsers re-send a POST body only on 307/308.
+        if (res.statusCode === 303 || ((res.statusCode === 301 || res.statusCode === 302) && method === "POST")) {
+          method = "GET";
+          body = undefined;
+        }
         continue;
       }
 
       const ct = String(res.headers["content-type"] ?? "").toLowerCase();
-      const okType = res.statusCode >= 400 || contentTypes.some((t) => ct.startsWith(t));
+      const okType = res.statusCode >= 400 || (!follow && res.statusCode >= 300) || method === "HEAD" || contentTypes.some((t) => ct.startsWith(t));
       if (!okType) {
         await res.body.dump();
         throw new SafeFetchError("bad_content_type", `Unexpected content type: ${ct || "none"}`);
@@ -175,6 +203,8 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
       const headers: Record<string, string> = {};
       const xr = res.headers["x-robots-tag"];
       if (xr) headers["x-robots-tag"] = (Array.isArray(xr) ? xr.join(", ") : String(xr)).slice(0, 500);
+      const responseHeaders: Record<string, string | string[]> = {};
+      for (const [k, v] of Object.entries(res.headers)) if (v !== undefined) responseHeaders[k.toLowerCase()] = v;
       return {
         url: url.toString(),
         status: res.statusCode,
@@ -182,7 +212,8 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
         body: Buffer.concat(chunks).toString("utf8"),
         redirects,
         redirectStatuses,
-        headers
+        headers,
+        responseHeaders
       };
     } catch (e) {
       if (e instanceof SafeFetchError) throw e;
