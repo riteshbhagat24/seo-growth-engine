@@ -23,6 +23,7 @@ export default async function WebsiteLayout({ children, params }: LayoutProps<"/
     { href: `${base}/search`, label: "Search performance" },
     { href: `${base}/traffic`, label: "Traffic" },
     { href: `${base}/onpage`, label: "On-page" },
+    { href: `${base}/backlinks`, label: "Backlinks" },
     ...(can(access.role, "websites.manage") ? [{ href: `${base}/settings`, label: "Settings" }] : [])
   ];
 

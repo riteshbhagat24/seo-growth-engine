@@ -3,6 +3,7 @@ import { hostname } from "node:os";
 import { createDb, getPool } from "@sge/db";
 import { serverEnv } from "@sge/config";
 import { jobHandlers } from "@sge/core";
+import { backlinkJobHandlers } from "@sge/backlinks";
 import { runTick } from "@sge/jobs";
 
 /**
@@ -24,7 +25,10 @@ async function main() {
   if (!env.WORKER_DATABASE_URL) throw new Error("WORKER_DATABASE_URL is not configured");
   const workerDb = createDb(env.WORKER_DATABASE_URL);
   const appDb = createDb(env.APP_DATABASE_URL);
-  const handlers = jobHandlers({ psiApiKey: env.PSI_API_KEY });
+  // Backlink submissions through Playwright need Chromium on this host (`npx playwright install chromium`).
+  // Set BACKLINKS_BROWSER=off where it isn't installed: browser jobs then wait for a worker that has it.
+  const browser = process.env.BACKLINKS_BROWSER !== "off";
+  const handlers = { ...jobHandlers({ psiApiKey: env.PSI_API_KEY }), ...backlinkJobHandlers({ browser, workerId: WORKER_ID }) };
   const tick = () =>
     runTick({
       workerDb,
@@ -35,9 +39,11 @@ async function main() {
       maxJobMs: 50_000,
       concurrency: Number(process.env.WORKER_CONCURRENCY ?? 4),
       perOrgConcurrency: 2,
+      // Without a browser, leave browser jobs queued for a worker that has one (instead of failing them).
+      types: browser ? undefined : Object.keys(handlers),
       log
     });
-  log("worker started", { mode: ONCE ? "once" : "daemon", budgetMs: BUDGET_MS });
+  log("worker started", { mode: ONCE ? "once" : "daemon", budgetMs: BUDGET_MS, backlinkBrowser: browser });
 
   const close = async () => {
     await getPool(env.WORKER_DATABASE_URL!).end();

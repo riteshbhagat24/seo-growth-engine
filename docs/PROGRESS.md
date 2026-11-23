@@ -330,13 +330,46 @@ Known gaps / remaining work:
 - **Volume and difficulty only from imports:** there's no paid keyword API, by design.
 - **Not built yet:** dark mode, and a workspace-wide keyword list across all websites.
 
-## Next: M6 — Backlink discovery, scoring and submissions
+## M6 — Backlink acquisition engine (with most of M7 and the M8 outreach CRM) ✅ (2026-11-23)
 
-Seed `link_sources` dataset, CSV, competitor and manual imports, footprint helper, site inspection, scoring with explanations, and a submission workflow with approvals.
+Integrated from the standalone build (13/13 acceptance there). What reuses the
+monorepo and what is new: [docs/BACKLINKS_INTEGRATION.md](BACKLINKS_INTEGRATION.md). Design decision: ADR-004 in ARCHITECTURE.
 
-## Seed directory dataset (draft, needs review)
+Implemented:
+- **`@sge/backlinks` (new package):** discovery (curated catalogue, URLs, CSV and competitor-backlink CSV, site expansion, manual research queries), qualification crawler with risk signals, 0–100 scoring with a reason per factor (no DA/DR), fact-checked asset generation from an approved business profile, six adapters (Listing API, HTTP form, Playwright browser form, manual/editorial, outreach email, WordPress partner draft), the browser egress proxy, the 16-state submission machine with full history and evidence, approvals, human tasks, verification with lost-link detection and recovery, outreach CRM, and funnel analytics.
+- **On the monorepo's infrastructure:** workspaces/roles/client scope (`inWorkspace`, permission matrix), RLS, the `jobs` queue and `schedules`, `safeFetch`, plan limits, encrypted secrets, audit log, GA4 data for referral sessions.
+- **Database:** 19 tables (migration 0012), seed catalogue, triggers, plan limit and RLS (0013).
+- **UI:** a Backlinks tab on each website: campaigns (funnel, create, pause/resume, opportunities with score reasons, imports, research queries), approvals (the exact snapshot), tasks (prepared values to copy), submission history and evidence, outreach, business profile, automation and destinations (with each adapter's test status). Failed backlink jobs can be retried from Settings → Jobs.
+- **Worker and web:** the worker runs every backlink job (browser jobs need Chromium; `BACKLINKS_BROWSER=off` leaves them queued); web ticks and `after()` processing run everything except browser jobs.
+- **Shared packages:** `safeFetch` gained POST, response headers, no-follow and `vetUrl` (existing behaviour unchanged); `runTick({ types })` and tenant-side `requeueJob()`; plan limit `backlink_submissions_month` and a real `backlinks_monitored` count.
 
-`packages/db/seed/link_sources.csv`: 108 free or freemium listing sites, research-checked on 2026-11-16. Not loaded into any database yet; it ships only after human review (M6).
+Fixed while porting (standalone issues): file-upload fields could read a profile-supplied local path on the worker; API tokens were read from an environment variable named by tenant data; two adapters claimed tests that didn't exist (now tested); a DNS failure on robots.txt was reported as "robots disallows".
+
+Verified (local, 2026-11-23; Postgres 17, Chromium 1255):
+| Check | Result |
+|---|---|
+| Typecheck (all packages + web) and web lint | ✅ |
+| `@sge/backlinks` unit (URL/SSRF primitives, signals, scoring, form filling incl. no file uploads, state machine, assets, discovery, autopilot policy, errors) | ✅ 21/21 |
+| `@sge/backlinks` acceptance TEST 1–9 + manual mode + worker role (real HTTP to the test destination, real Chromium, the shared queue) | ✅ 11/11 |
+| `@sge/backlinks` acceptance TEST 10–12 (isolation and roles, crawler and browser SSRF, retries/leases/time slices/plan allowance/failure queue) | ✅ 3/3 |
+| `@sge/backlinks` adapter contracts (WordPress drafts; outreach approval, mailbox, opt-out suppression) | ✅ 4/4 |
+| `@sge/crawler` (+4 POST/headers/no-follow/vetUrl) | ✅ 91/91 |
+| `@sge/jobs` (+2 type filter, tenant requeue) | ✅ 13/13 |
+| `@sge/core` 215, `@sge/seo-rules` 48, `@sge/db` 12 (schema invariants now cover the 19 new tables) | ✅ unchanged and passing |
+
+The acceptance suite runs offline by default: every public hostname fails to resolve, so only the project's own test destination is contacted. `BACKLINKS_LIVE_TESTS=1` also crawls real catalogue sites (read-only, robots-respecting) for TEST 2.
+
+Known gaps / remaining work:
+- **E2E (Playwright, browser UI) for the Backlinks pages** is not written yet; the pages are typechecked, linted and built, and every action goes through services covered by the acceptance suite.
+- **No per-workspace SMTP mailbox (M8).** Outreach ends in a "send it from your mailbox" task; sending through a mailbox is tested with an in-memory transport only.
+- **WordPress partner drafts** are tested against a WordPress-compatible endpoint, not a real WordPress install.
+- **No third-party destination is automated.** Every catalogue destination is manual-only until someone records explicit permission.
+- **Evidence retention** by plan, and the M7 cadence refinements (daily checks for new links, monthly for lost), are follow-ups; links are re-checked weekly.
+- **Search-engine discovery** is manual by design (query templates); a bring-your-own-key search provider is not built.
+
+## Seed directory dataset (reviewed for M6, 2026-11-23)
+
+`packages/db/seed/link_sources.csv`: 108 free or freemium listing sites, research-checked on 2026-11-16. Reviewed and loaded by migration 0013, merged with the standalone's curated list (139 global sources): **all manual-only** (none of these destinations has granted automation), all `unverified`, and four UGC communities (Reddit, Hacker News, Quora, GrowthHackers) retired because posting there to obtain links breaks their rules. The table below is the original research summary.
 
 | Confidence | Rows | Meaning |
 |---|---|---|

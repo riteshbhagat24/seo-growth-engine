@@ -6,7 +6,9 @@ const nextConfig: NextConfig = {
   // Self-contained server bundle: required for cPanel (Passenger) deployment.
   output: "standalone",
   outputFileTracingRoot: path.join(__dirname, "../../"),
-  transpilePackages: ["@sge/db", "@sge/config", "@sge/core", "@sge/crawler", "@sge/jobs", "@sge/seo-rules"],
+  transpilePackages: ["@sge/db", "@sge/config", "@sge/core", "@sge/crawler", "@sge/jobs", "@sge/seo-rules", "@sge/backlinks"],
+  // Browser automation runs only in the worker; never bundle Playwright into the web app.
+  serverExternalPackages: ["playwright", "playwright-core"],
   poweredByHeader: false,
   async headers() {
     return [

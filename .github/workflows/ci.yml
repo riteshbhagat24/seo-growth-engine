@@ -34,12 +34,13 @@ jobs:
         run: node scripts/dev-env.mjs
       - run: pnpm typecheck
       - run: pnpm --filter @sge/web lint
+      # Before the tests: the backlink acceptance suite drives real Chromium (browser-form adapter, egress proxy).
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
       - name: Unit + integration tests (incl. tenant isolation)
         run: pnpm test
       - run: pnpm db:migrate
       - run: pnpm build:standalone
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
       - name: End-to-end tests
         run: pnpm e2e
       - uses: actions/upload-artifact@v4

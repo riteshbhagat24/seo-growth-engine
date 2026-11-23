@@ -16,12 +16,13 @@ export const LIMIT_LABEL: Record<LimitKey, string> = {
   keywords: "Tracked keywords",
   backlinks_monitored: "Backlinks monitored",
   reports_month: "Reports / month",
-  psi_runs_month: "Core Web Vitals tests / month"
+  psi_runs_month: "Core Web Vitals tests / month",
+  backlink_submissions_month: "Automated backlink submissions / month"
 };
 
 /** Limits counted from existing rows; the rest are metered per calendar month. */
 const STOCK: LimitKey[] = ["websites", "clients", "members", "keywords", "backlinks_monitored"];
-export const METERED: LimitKey[] = ["pages_crawled_month", "reports_month", "psi_runs_month"];
+export const METERED: LimitKey[] = ["pages_crawled_month", "reports_month", "psi_runs_month", "backlink_submissions_month"];
 
 export async function defaultPlanFor(tx: Tx, type: Organization["type"]): Promise<string> {
   const [p] = await tx
@@ -81,8 +82,21 @@ async function stockUsage(tx: Tx, organizationId: string, key: LimitKey): Promis
       }
       case "keywords":
         return count(tx.select({ n: sql<number>`count(*)::int` }).from(schema.keywords).where(eq(schema.keywords.organizationId, organizationId)));
+      case "backlinks_monitored":
+        // Links the verifier monitors: submitted and awaiting publication, published, live, or lost (re-checked).
+        return count(
+          tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(schema.backlinkSubmissions)
+            .where(
+              and(
+                eq(schema.backlinkSubmissions.organizationId, organizationId),
+                sql`${schema.backlinkSubmissions.status} in ('PENDING_VERIFICATION', 'PUBLISHED', 'VERIFIED', 'LOST')`
+              )
+            )
+        );
       default:
-        return 0; // backlinks: table arrives in a later milestone
+        return 0;
     }
   } finally {
     await tx.execute(sql`select set_config('app.client_scope', ${prev}, true)`);
